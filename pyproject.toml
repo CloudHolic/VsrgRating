@@ -1,0 +1,57 @@
+[project]
+name = "vsrgrating"
+version = "0.1.0"
+description = "Measures VSRG chart difficulty from play responses and learns it from charts."
+readme = "README.md"
+authors = [{ name = "CloudHolic", email = "cloudholic@pm.me" }]
+requires-python = ">=3.14"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=9.2.0", "ruff>=0.17.3", "ty>=0.0.96"]
+research = [
+	"hydra-core>=1.3.8",
+	"numpy>=2.5.4",
+	"omegaconf>=2.3.1",
+	"polars>=2.1.0",
+	"psycopg[binary]>=3.3.7",
+	"typer>=0.27.3",
+]
+
+[tool.uv]
+default-groups = ["dev", "research"]
+
+[build-system]
+requires = ["hatchling>=1.33.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vsrgrating"]
+
+[tool.pytest.ini_options]
+testpaths = ["scratch/tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.format]
+indent-style = "tab"
+quote-style = "double"
+
+[tool.ruff.lint]
+select = [
+	"E",
+	"F",
+	"I",
+	"A",
+	"B",
+	"C4",
+	"N",
+	"NPY",
+	"PIE",
+	"RET",
+	"RUF",
+	"SIM",
+	"UP",
+]

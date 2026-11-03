@@ -1,0 +1,5 @@
+dsn: ${oc.env:DSN}
+schema: public
+dump_dir: null
+schema_only: false
+dry_run: false
