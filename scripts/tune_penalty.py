@@ -17,8 +17,7 @@ from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
 from vsrgrating.data import Split, load_split, locate_dataset, split_persons
-from vsrgrating.evaluation.fitted import Fitted
-from vsrgrating.evaluation.heldout import paired_difference, person_posterior
+from vsrgrating.evaluation import Fitted, paired_difference, person_posterior
 from vsrgrating.irt.cnrm.em import init_person_mean_ols
 from vsrgrating.irt.cnrm.transform import TransformSpec
 from vsrgrating.irt.map import MAPConfig, Model, cnrm_params, fit_map

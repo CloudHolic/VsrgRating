@@ -14,10 +14,15 @@ from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
 from vsrgrating.data import Split, load_split, locate_dataset, subset
-from vsrgrating.evaluation import shape
-from vsrgrating.evaluation.fitted import Fitted, load_run, locate_run
-from vsrgrating.evaluation.heldout import paired_difference, person_posterior
-from vsrgrating.evaluation.predictive import cell_predictive
+from vsrgrating.evaluation import (
+	Fitted,
+	cell_predictive,
+	load_run,
+	locate_run,
+	paired_difference,
+	person_posterior,
+	shape,
+)
 from vsrgrating.tracking import run_output, write_metrics
 
 THRESHOLDS = {

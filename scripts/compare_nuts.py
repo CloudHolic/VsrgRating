@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
 from vsrgrating.data import locate_dataset
-from vsrgrating.evaluation.fitted import load_run, locate_run
+from vsrgrating.evaluation import load_run, locate_run
 from vsrgrating.irt.zoi_beta.model import COORDS, ItemParams
 from vsrgrating.readout.grids import GRIDS
 from vsrgrating.readout.zoi_beta import b50
