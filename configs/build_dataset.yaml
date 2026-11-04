@@ -1,0 +1,6 @@
+defaults:
+  - dataset: core300
+  - _self_
+
+dsn: ${oc.env:DSN}
+out_root: data/datasets
