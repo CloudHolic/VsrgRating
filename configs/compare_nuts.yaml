@@ -1,0 +1,12 @@
+defaults:
+  - dataset: core300
+  - tracking: local
+  - _self_
+
+name: ???
+responses: [acc, score]
+nuts: ???
+map: ???
+halves: [[0, 1], [2, 3]]
+dataset_root: data/datasets
+runs_root: runs

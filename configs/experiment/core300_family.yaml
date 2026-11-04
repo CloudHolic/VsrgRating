@@ -1,0 +1,11 @@
+# @package _global_
+name: core300_family
+reference: zoi_beta_map
+runs:
+  zoi_beta_nuts: core300_zoi_beta_nuts
+  zoi_beta_map: core300_zoi_beta_map
+  cnrm_em: core300_cnrm_em
+  cnrm_map_linear: core300_cnrm_map_linear
+  cnrm_map_boxcox: core300_cnrm_map_boxcox
+  cnrm_map_spline: core300_cnrm_map_spline
+  cnrm_map_pspline: core300_cnrm_map_pspline
