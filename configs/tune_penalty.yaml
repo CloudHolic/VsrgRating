@@ -1,0 +1,15 @@
+defaults:
+  - dataset: core300
+  - model: cnrm
+  - transform: pspline
+  - estimator: map
+  - tracking: local
+  - _self_
+
+name: ???
+responses: [acc, score]
+penalties: ???
+holdout_fraction: 0.2
+seed: ???
+dataset_root: data/datasets
+runs_root: runs
