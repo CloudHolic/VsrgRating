@@ -1,0 +1,6 @@
+kind: map
+n_nodes: 21
+steps: 3000
+learning_rate: ???
+final_lr_fraction: ???
+scan_every: 20

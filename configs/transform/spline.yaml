@@ -1,0 +1,2 @@
+kind: spline
+knots: { start: -8.0, stop: 0.0, num: 12 }

@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - override /model: cnrm
+  - override /transform: <kind>
+  - override /estimator: map
+
+name: core300_cnrm_map_pspline
+estimator:
+  learning_rate: 0.005
+  final_lr_fraction: 0.02

@@ -1,0 +1,12 @@
+defaults:
+  - dataset: core300
+  - model: cnrm
+  - transform: null
+  - estimator: map
+  - tracking: local
+  - _self_
+
+name: ???
+responses: [acc, score]
+dataset_root: data/datasets
+runs_root: runs

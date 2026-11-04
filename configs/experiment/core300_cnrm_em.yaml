@@ -1,0 +1,7 @@
+# @package _global_
+defaults:
+  - override /model: cnrm
+  - override /transform: linear
+  - override /estimator: em
+
+name: core300_cnrm_em

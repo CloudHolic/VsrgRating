@@ -1,0 +1,6 @@
+# @package _global_
+defaults:
+  - override /model: zoi_beta
+  - override /estimator: nuts
+
+name: core300_zoi_beta_nuts
