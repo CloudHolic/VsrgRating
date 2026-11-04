@@ -65,3 +65,16 @@ def run_hash(path: Path) -> str:
 	"""The dataset hash the fit in `path` read."""
 	record = json.loads((path / "metrics.json").read_text(encoding="utf-8"))
 	return record["tags"]["dataset_hash"]
+
+
+def locate_run(runs_root: Path, experiment: str, response: str, dataset_hash: str) -> Path:
+	"""The finished fit `runs_root/experiment/response`, checked to have read `dataset_hash`."""
+	path = runs_root / experiment / response
+	if not (path / "metrics.json").exists():
+		raise FileNotFoundError(f"no finished fit at {path}")
+
+	found = run_hash(path)
+	if found != dataset_hash:
+		raise ValueError(f"{path} was fit on dataset {found}, not {dataset_hash}")
+
+	return path

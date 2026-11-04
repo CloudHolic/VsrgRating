@@ -19,15 +19,16 @@ METRICS = "metrics.json"
 
 
 @contextmanager
-def run_output(cfg: DictConfig, overrides: Sequence[str], response: str) -> Generator[Path]:
-	"""A directory for one fit's outputs, starting with config.yaml and overrides.yaml.
+def run_output(cfg: DictConfig, overrides: Sequence[str], part: str) -> Generator[Path]:
+	"""A directory for one part's outputs (a response, or what a run judges jointly), starting
+	with config.yaml and overrides.yaml.
 
-	- local: `runs_root/name/response`, staged and renamed into place only when the fit succeeds.
-	- mlflow: a temporary directory uploaded with metrics.json to the run `<name>-<response>`
-	when the fit succeeds; a failed fit leaves the run FAILED.
+	- local: `runs_root/name/part`, staged and renamed into place only when the run succeeds.
+	- mlflow: a temporary directory uploaded with metrics.json to the run `<name>-<part>`
+	when the run succeeds; a failed run leaves it FAILED.
 	"""
 	run = _mlflow_run if cfg.tracking.mlflow else _local_run
-	with run(cfg, response) as out:
+	with run(cfg, part) as out:
 		OmegaConf.save(cfg, out / "config.yaml")
 		OmegaConf.save(OmegaConf.create(list(overrides)), out / "overrides.yaml")
 		yield out
@@ -49,12 +50,12 @@ def write_metrics(
 
 
 @contextmanager
-def _local_run(cfg: DictConfig, response: str) -> Generator[Path]:
-	target = Path(cfg.runs_root) / cfg.name / response
+def _local_run(cfg: DictConfig, part: str) -> Generator[Path]:
+	target = Path(cfg.runs_root) / cfg.name / part
 	if target.exists():
 		raise FileExistsError(f"{target} already holds a run")
 
-	staging = target.with_name(f".staging-{response}-{os.getpid()}")
+	staging = target.with_name(f".staging-{part}-{os.getpid()}")
 	staging.mkdir(parents=True)
 
 	try:
@@ -67,10 +68,10 @@ def _local_run(cfg: DictConfig, response: str) -> Generator[Path]:
 
 
 @contextmanager
-def _mlflow_run(cfg: DictConfig, response: str) -> Generator[Path]:
+def _mlflow_run(cfg: DictConfig, part: str) -> Generator[Path]:
 	client = MlflowClient(cfg.tracking.uri)
 	experiment_id = _experiment_id(client, cfg.tracking.experiment)
-	run = client.create_run(experiment_id, run_name=f"{cfg.name}-{response}")
+	run = client.create_run(experiment_id, run_name=f"{cfg.name}-{part}")
 	run_id = run.info.run_id
 
 	try:
