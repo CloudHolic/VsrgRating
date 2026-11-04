@@ -1,7 +1,7 @@
 # @package _global_
 defaults:
   - override /model: cnrm
-  - override /transform: <kind>
+  - override /transform: boxcox
   - override /estimator: map
 
 name: core300_cnrm_map_boxcox
