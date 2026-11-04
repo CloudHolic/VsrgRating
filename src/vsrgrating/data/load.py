@@ -70,3 +70,30 @@ def load_split(path: Path, response: str, split: str) -> Split:
 		person_idx=persons["person_idx"].to_numpy(),
 		dataset_hash=manifest["hash"],
 	)
+
+
+def split_persons(split: Split, fraction: float, seed: int) -> tuple[Split, Split]:
+	"""(kept, held out): a random `fraction` of the persons and all their cells held out."""
+	if not 0.0 < fraction < 1.0:
+		raise ValueError(f"fraction must be in (0, 1), got {fraction}")
+
+	rng = np.random.default_rng(seed)
+	held = np.zeros(split.n_persons, dtype=bool)
+	held[rng.choice(split.n_persons, size=round(fraction * split.n_persons), replace=False)] = True
+
+	return subset(split, ~held[split.person]), subset(split, held[split.person])
+
+
+def subset(split: Split, cells: np.ndarray) -> Split:
+	"""The cells under the mask; persons left without cells drop out, the rest keep their order."""
+	kept, person = np.unique(split.person[cells], return_inverse=True)
+
+	return Split(
+		person=person,
+		item=split.item[cells],
+		x=split.x[cells],
+		n_persons=kept.size,
+		n_items=split.n_items,
+		person_idx=split.person_idx[kept],
+		dataset_hash=split.dataset_hash,
+	)

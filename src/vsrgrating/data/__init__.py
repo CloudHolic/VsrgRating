@@ -2,7 +2,16 @@
 
 from .build import build
 from .config import DatasetConfig
-from .load import Split, load_split, locate_dataset
+from .load import Split, load_split, locate_dataset, split_persons, subset
 from .tables import RESPONSES
 
-__all__ = ["RESPONSES", "DatasetConfig", "Split", "build", "load_split", "locate_dataset"]
+__all__ = [
+	"RESPONSES",
+	"DatasetConfig",
+	"Split",
+	"build",
+	"load_split",
+	"locate_dataset",
+	"split_persons",
+	"subset",
+]

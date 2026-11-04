@@ -59,24 +59,39 @@ class Model:
 
 	def cell_log_k(self, params: dict[str, Array], cells: Cells, theta: Array) -> Array:
 		"""log k at every cell; theta is (cells,) or (cells, nodes)."""
+		return self.item_log_k(self.item_params(params), params.get("transform"), cells, theta)
+
+	def item_params(self, params: dict[str, Array]) -> zoi_beta.ItemParams | cnrm.ItemParams:
+		"""The model's coordinates from the optimizer's."""
+		if self.family == "cnrm":
+			return cnrm.ItemParams(
+				jnp.exp(params["log_alpha"]), params["beta"], jnp.exp(params["log_sigma"])
+			)
+
+		return zoi_beta.ItemParams(*zoi_tau(params))
+
+	def item_log_k(
+		self,
+		item: zoi_beta.ItemParams | cnrm.ItemParams,
+		raw: Array | None,
+		cells: Cells,
+		theta: Array,
+	) -> Array:
+		"""log k at every cell from the model's coordinates; `raw` is G's parameters (cnrm only)."""
 		col = (lambda v: v[cells.item]) if theta.ndim == 1 else (lambda v: v[cells.item][:, None])
 		x = cells.x if theta.ndim == 1 else cells.x[:, None]
+		picked = jax.tree.map(col, item)
 
 		if self.family == "cnrm":
 			assert self.transform is not None
+			assert raw is not None
 
-			g, log_dg = self.transform.apply(params["transform"], cells.x_in)
+			g, log_dg = self.transform.apply(raw, cells.x_in)
 			scale = (g, log_dg) if theta.ndim == 1 else (g[:, None], log_dg[:, None])
-			item = cnrm.ItemParams(
-				jnp.exp(col(params["log_alpha"])),
-				col(params["beta"]),
-				jnp.exp(col(params["log_sigma"])),
-			)
 
-			return cnrm.log_k(x, theta, item, scale)
+			return cnrm.log_k(x, theta, picked, scale)
 
-		tau = zoi_tau(params)
-		return zoi_beta.log_k(x, theta, zoi_beta.ItemParams(*(col(t) for t in tau)))
+		return zoi_beta.log_k(x, theta, picked)
 
 	def log_prior(self, params: dict[str, Array], scale: float) -> Array:
 		"""ZOI: the paper's h(tau) at tau(z), no Jacobian (MAP). CNRM: N(0, scale) everywhere,
