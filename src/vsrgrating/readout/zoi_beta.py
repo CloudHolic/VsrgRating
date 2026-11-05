@@ -13,7 +13,18 @@ from .roots import increasing_root
 
 def exceedance(item: ItemParams, theta: Array, y: float) -> Array:
 	"""P(Y >= y | theta): the mass at 1 plus the interior mass above y."""
-	a_theta = jnp.exp(item.log_a) * theta
+	return _exceedance(item, jnp.exp(item.log_a) * theta, y)
+
+
+def b50(item: ItemParams, y: float) -> np.ndarray:
+	"""Each item's b50(y), started from where the interior mean is y."""
+	guess = (np.log(y / (1.0 - y)) - np.asarray(item.b))
+	root = increasing_root(lambda s: _exceedance(item, jnp.asarray(s), y), 0.5, guess)
+
+	return root / np.exp(np.asarray(item.log_a))
+
+
+def _exceedance(item: ItemParams, a_theta: Array, y: float) -> Array:
 	u0 = item.gamma_0 - a_theta
 	u1 = item.gamma_1 - a_theta
 	p_interior = jnp.exp(
@@ -26,10 +37,3 @@ def exceedance(item: ItemParams, theta: Array, y: float) -> Array:
 
 	# I_{1-y}(beta, alpha) is 1 - I_y(alpha, beta) without subtracting from one.
 	return jax.nn.sigmoid(-u1) + p_interior * betainc(beta, alpha, 1.0 - y)
-
-
-def b50(item: ItemParams, y: float) -> np.ndarray:
-	"""Each item's b50(y), started from where the interior mean is y."""
-	guess = (np.log(y / (1.0 - y)) - np.asarray(item.b)) / np.exp(np.asarray(item.log_a))
-
-	return increasing_root(lambda t: exceedance(item, jnp.asarray(t), y), 0.5, guess)
