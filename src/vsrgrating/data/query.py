@@ -61,3 +61,17 @@ def fetch_ingest_log(conn: psycopg.Connection) -> list[dict[str, Any]]:
 			"SELECT dump_file, member, target_table, in_top, in_random, rows_written"
 			" FROM ingest_log ORDER BY id"
 		).fetchall()
+
+
+def fetch_beatmaps(conn: psycopg.Connection, beatmap_ids: list[int]) -> pl.DataFrame:
+	"""Each chart's beatmapset and difficulty name, for finding mapset units."""
+	with conn.cursor() as cur:
+		rows = cur.execute(
+			"SELECT beatmap_id, beatmapset_id, version FROM beatmaps WHERE beatmap_id = ANY(%s)",
+			(beatmap_ids,),
+		).fetchall()
+	return pl.DataFrame(
+		rows,
+		schema={"beatmap_id": pl.Int64, "beatmapset_id": pl.Int64, "version": pl.String},
+		orient="row",
+	)

@@ -3,7 +3,7 @@
 import numpy as np
 import polars as pl
 
-STREAMS = ("items", "persons", "split")
+STREAMS = ("items", "persons", "split", "units")
 
 
 def spawn_rngs(seed: int) -> dict[str, np.random.Generator]:
@@ -72,3 +72,15 @@ def split_persons(n: int, test_fraction: float, rng: np.random.Generator) -> np.
 	test = np.zeros(n, dtype=bool)
 	test[rng.permutation(n)[: round(n * test_fraction)]] = True
 	return test
+
+
+def sample_units(units: pl.DataFrame, target_items: int, rng: np.random.Generator) -> pl.DataFrame:
+	"""Units in a seeded order, taken until their charts reach target_items."""
+	ordered = units.sort("beatmapset_id", "keys")[rng.permutation(units.height)]
+	size = pl.col("order").list.len()
+
+	return (
+		ordered.with_columns(size.cum_sum().alias("reached"))
+		.filter(pl.col("reached") - size < target_items)
+		.drop("reached")
+	)

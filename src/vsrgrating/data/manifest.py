@@ -23,11 +23,17 @@ RULES = {
 	"core": "k-core of the pool: items with at least min_item_responses responses and persons "
 	"with at least min_person_responses, repeated until neither changes.",
 	"items": "Drawn uniformly within each key mode of the core; key modes get items in "
-	"proportion to their core counts, at least one each.",
+	"proportion to their core counts, at least one each. The anchor items below are added.",
+	"anchors": "C5: (beatmapset, keys) units of the core's NM charts whose difficulty names give "
+	"their order, drawn in a seeded order until mapset_items charts. C6: the dan course charts "
+	"(NM), taken from the pool without the core. A unit is listed only with the charts left "
+	"in the final dataset, and only if at least two remain.",
 	"persons": "Persons with at least min_person_responses responses on the drawn items; "
-	"n_persons of them drawn uniformly and split into train and test.",
-	"final": "k-core of the drawn sample: items with at least min_item_train_responses train "
-	"responses and persons with at least min_person_responses, repeated until neither changes.",
+	"n_persons of them drawn uniformly (all if null) and split into train and test (all "
+	"train if test_fraction is null).",
+	"final": "k-core of the drawn sample, anchor items included: items with at least "
+	"min_item_train_responses train responses and persons with at least "
+	"min_person_responses, repeated until neither changes.",
 	"boundary": "A response is an endpoint iff it equals 0.0 or 1.0 exactly; no tolerance.",
 }
 
@@ -44,6 +50,7 @@ def make_manifest(
 	eligible: dict[int, int],
 	allocation: dict[int, int],
 	stages: dict[str, dict[str, int]],
+	anchors: dict[str, Any],
 	items: pl.DataFrame,
 	persons: pl.DataFrame,
 	responses: pl.DataFrame,
@@ -63,6 +70,7 @@ def make_manifest(
 			str(k): {"core": eligible[k], "allocated": n, "kept": kept.get(k, 0)}
 			for k, n in sorted(allocation.items())
 		},
+		"anchors": anchors,
 		"counts": {
 			"stages": stages,
 			"items": items.height,

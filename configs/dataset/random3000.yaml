@@ -1,0 +1,10 @@
+name: random3000
+n_items: 3000
+min_item_responses: 100
+min_person_responses: 2
+min_item_train_responses: 2
+n_persons: null
+test_fraction: null
+seed: 20261105
+mapset_items: 500
+dan_courses: true

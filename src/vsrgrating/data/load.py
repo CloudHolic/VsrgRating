@@ -55,6 +55,9 @@ def load_split(path: Path, response: str, split: str) -> Split:
 		.with_row_index("p")
 		.with_columns(pl.col("p").cast(pl.Int64))
 	)
+	if persons.height == 0:
+		raise ValueError(f"{path.name} has no {split} persons")
+
 	cells = (
 		pl.read_parquet(path / "responses.parquet")
 		.join(persons.select("p", "person_idx"), on="person_idx")
