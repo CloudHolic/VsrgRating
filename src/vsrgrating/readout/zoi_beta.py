@@ -18,7 +18,7 @@ def exceedance(item: ItemParams, theta: Array, y: float) -> Array:
 
 def b50(item: ItemParams, y: float) -> np.ndarray:
 	"""Each item's b50(y), started from where the interior mean is y."""
-	guess = (np.log(y / (1.0 - y)) - np.asarray(item.b))
+	guess = np.log(y / (1.0 - y)) - np.asarray(item.b)
 	root = increasing_root(lambda s: _exceedance(item, jnp.asarray(s), y), 0.5, guess)
 
 	return root / np.exp(np.asarray(item.log_a))
