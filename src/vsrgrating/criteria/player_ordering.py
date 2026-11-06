@@ -244,7 +244,7 @@ def _null(
 	for draw, table in enumerate(drawn):
 		for name, rank in agreement(values, items, table).items():
 			flipped, gap = discordance(values[name][items], table)
-			rho[name][draw] = float(np.median(rank))
+			rho[name][draw] = float(np.nanmedian(rank))
 			bands[name][draw] = np.nanmedian(band_rates(flipped, gap, edges), axis=0)
 			weights[name][draw] = float(np.nanmedian(weighted_rate(flipped, gap)))
 
