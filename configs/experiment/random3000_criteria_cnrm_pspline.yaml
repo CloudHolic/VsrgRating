@@ -1,0 +1,11 @@
+# @package _global_
+defaults:
+  - override /model: cnrm
+  - override /transform: pspline
+  - override /estimator: map
+
+name: random3000_criteria_cnrm_pspline
+base: random3000_cnrm_map_pspline
+estimator:
+  learning_rate: 0.005
+  final_lr_fraction: 0.02

@@ -4,13 +4,11 @@ uv run --env-file .env scripts/fit.py +experiment=core300_cnrm_em
 uv run --env-file .env scripts/fit.py +experiment=core300_zoi_beta_map tracking=mlflow
 """
 
-import json
 import time
 from pathlib import Path
 from typing import Annotated
 
 import jax
-import jax.numpy as jnp
 import numpy as np
 import polars as pl
 import typer
@@ -18,9 +16,16 @@ from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
 from vsrgrating.data import Split, load_split, locate_dataset
-from vsrgrating.irt.cnrm.em import EMConfig, fit_em, init_person_mean_ols, person_loglik
-from vsrgrating.irt.cnrm.transform import TransformSpec
-from vsrgrating.irt.map import MAPConfig, Model, cnrm_params, fit_map, zoi_moment_init, zoi_tau
+from vsrgrating.fitting import (
+	build_model,
+	fit_map_split,
+	map_settings,
+	run_tags,
+	write_map,
+	write_persons,
+)
+from vsrgrating.irt.cnrm.em import EMConfig, fit_em, person_loglik
+from vsrgrating.irt.map import MAPConfig, Model
 from vsrgrating.irt.zoi_beta.model import COORDS
 from vsrgrating.irt.zoi_beta.nuts import NUTSConfig, fit_nuts, summarize
 from vsrgrating.tracking import run_output, write_metrics
@@ -44,21 +49,6 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 			write_metrics(out, run_tags(cfg, model, data, response), metrics, series)
 
 
-def build_model(cfg: DictConfig) -> Model:
-	"""The model, rejecting an estimator that does not apply to it."""
-	transform = cfg.get("transform")
-	spec = None if transform is None else TransformSpec.from_config(transform)
-	model = Model(cfg.model.family, spec)
-
-	kind = cfg.estimator.kind
-	if kind == "nuts" and model.family != "zoi_beta":
-		raise ValueError("nuts samples zoi_beta only")
-	if kind == "em" and (spec is None or spec.kind != "linear"):
-		raise ValueError("em fits the cnrm with a linear transform only")
-
-	return model
-
-
 def build_settings(cfg: DictConfig) -> Settings:
 	"""The estimator's settings; a value left at ??? fails here, before any data is read."""
 	e = cfg.estimator
@@ -74,14 +64,7 @@ def build_settings(cfg: DictConfig) -> Settings:
 				chain_method=e.chain_method,
 			)
 		case "map":
-			return MAPConfig(
-				n_nodes=e.n_nodes,
-				steps=e.steps,
-				learning_rate=e.learning_rate,
-				final_lr_fraction=e.final_lr_fraction,
-				scan_every=e.scan_every,
-				prior_scale=cfg.model.prior_scale,
-			)
+			return map_settings(cfg)
 		case "em":
 			return EMConfig(n_nodes=e.n_nodes, tol=e.tol, max_iter=e.max_iter)
 
@@ -97,21 +80,6 @@ def fit(cfg: DictConfig, model: Model, settings: Settings, data: Split, out: Pat
 			return run_map(model, settings, data, out)
 		case EMConfig():
 			return run_em(settings, data, out, cfg.estimator.ref_nodes)
-
-
-def run_tags(cfg: DictConfig, model: Model, data: Split, response: str) -> dict[str, str]:
-	device = jax.devices()[0]
-	tags = {
-		"family": model.family,
-		"estimator": cfg.estimator.kind,
-		"response": response,
-		"dataset_hash": data.dataset_hash,
-		"device": f"{device.platform}:{device.device_kind}",
-	}
-	if model.transform is not None:
-		tags["transform"] = model.transform.kind
-
-	return tags
 
 
 def run_nuts(config: NUTSConfig, data: Split, out: Path, scale: float, thin: int) -> Record:
@@ -167,47 +135,13 @@ def run_nuts(config: NUTSConfig, data: Split, out: Path, scale: float, thin: int
 
 
 def run_map(model: Model, config: MAPConfig, data: Split, out: Path) -> Record:
-	"""MAP from a data-only start: moments for zoi_beta, person-mean OLS for the cnrm."""
-	if model.family == "cnrm":
-		assert model.transform is not None
-		ols = init_person_mean_ols(data.person, data.item, data.x, data.n_persons, data.n_items)
-		init = cnrm_params(*ols, model.transform)
-	else:
-		init = zoi_moment_init(data.item, data.x, data.n_items)
-
 	start = time.perf_counter()
-	result = fit_map(model, data.person, data.item, data.x, data.n_persons, init, config)
+	result = fit_map_split(model, config, data)
 	runtime = time.perf_counter() - start
 
-	p = result.params
-	if model.family == "cnrm":
-		assert model.transform is not None
-		items = {
-			"alpha": np.exp(p["log_alpha"]),
-			"beta": p["beta"],
-			"sigma": np.exp(p["log_sigma"]),
-		}
-		write_transform(out, model.transform, p["transform"])
-	else:
-		tau = zoi_tau({name: jnp.asarray(value) for name, value in p.items()})
-		items = {c: np.asarray(v) for c, v in zip(COORDS, tau, strict=True)}
-
-	pl.DataFrame({"item_idx": np.arange(data.n_items), **items}).write_parquet(
-		out / "items.parquet"
-	)
-	write_persons(out, data, result.eap, result.psd)
-	pl.DataFrame({"step": np.arange(len(result.loss)), "loss": result.loss}).write_parquet(
-		out / "trace.parquet"
-	)
-
-	metrics = {
-		"runtime_s": runtime,
-		"best_loss": result.best_loss,
-		"best_step": result.best_step,
-		"drop_last": result.drop_last,
-		"log_marginal": result.log_marginal,
+	return {"runtime_s": runtime, **write_map(out, model, data, result)}, {
+		"loss": result.loss.tolist()
 	}
-	return metrics, {"loss": result.loss.tolist()}
 
 
 def run_em(config: EMConfig, data: Split, out: Path, ref_nodes: int) -> Record:
@@ -250,26 +184,6 @@ def run_em(config: EMConfig, data: Split, out: Path, ref_nodes: int) -> Record:
 		"sigma_q50": float(sigma_q[2]),
 	}
 	return metrics, {"loglik": result.loglik.tolist()}
-
-
-def write_persons(out: Path, data: Split, eap: np.ndarray, psd: np.ndarray) -> None:
-	pl.DataFrame({"person_idx": data.person_idx, "eap": eap, "psd": psd}).write_parquet(
-		out / "persons.parquet"
-	)
-
-
-def write_transform(out: Path, spec: TransformSpec, raw: np.ndarray) -> None:
-	knots = np.asarray(spec.knots)
-	record = {
-		"kind": spec.kind,
-		"knots": knots.tolist(),
-		"penalty": spec.penalty,
-		"raw": np.atleast_1d(raw).tolist(),
-		"exponent_at_knots": np.asarray(
-			spec.exponent(jnp.asarray(raw), jnp.asarray(knots))
-		).tolist(),
-	}
-	(out / "transform.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

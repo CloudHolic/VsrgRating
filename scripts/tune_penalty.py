@@ -18,9 +18,9 @@ from omegaconf import DictConfig
 from vsrgrating.config import compose_config
 from vsrgrating.data import Split, load_split, locate_dataset, split_persons
 from vsrgrating.evaluation import Fitted, paired_difference, person_posterior
-from vsrgrating.irt.cnrm.em import init_person_mean_ols
+from vsrgrating.fitting import fit_map_split, map_settings
 from vsrgrating.irt.cnrm.transform import TransformSpec
-from vsrgrating.irt.map import MAPConfig, Model, cnrm_params, fit_map
+from vsrgrating.irt.map import MAPConfig, Model
 from vsrgrating.tracking import run_output, write_metrics
 
 type Splits = dict[str, tuple[Split, Split]]
@@ -65,18 +65,6 @@ def base_spec(cfg: DictConfig) -> TransformSpec:
 	return TransformSpec.from_config(cfg.transform)
 
 
-def map_settings(cfg: DictConfig) -> MAPConfig:
-	e = cfg.estimator
-	return MAPConfig(
-		n_nodes=e.n_nodes,
-		steps=e.steps,
-		learning_rate=e.learning_rate,
-		final_lr_fraction=e.final_lr_fraction,
-		scan_every=e.scan_every,
-		prior_scale=cfg.model.prior_scale,
-	)
-
-
 def check_held(splits: Splits) -> None:
 	"""The joint held-out adds each person's responses, so every response holds out the same
 	persons."""
@@ -112,11 +100,9 @@ def fit_and_score(
 ) -> tuple[dict[str, float], pl.DataFrame, np.ndarray]:
 	"""MAP from person-mean OLS on `kept`; each held person's log marginal, and q at the knots."""
 	model = Model("cnrm", spec)
-	ols = init_person_mean_ols(kept.person, kept.item, kept.x, kept.n_persons, kept.n_items)
-	init = cnrm_params(*ols, spec)
 
 	start = time.perf_counter()
-	result = fit_map(model, kept.person, kept.item, kept.x, kept.n_persons, init, settings)
+	result = fit_map_split(model, settings, kept)
 	runtime = time.perf_counter() - start
 
 	params = {k: jnp.asarray(v) for k, v in result.params.items()}

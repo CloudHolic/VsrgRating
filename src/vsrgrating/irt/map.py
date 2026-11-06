@@ -307,7 +307,7 @@ def _modes(
 
 def zoi_moment_init(item: np.ndarray, x: np.ndarray, n_items: int) -> dict[str, Array]:
 	"""A data-only starting point: each item's interior mean and spread, and endpoint rates."""
-	n = np.bincount(item, minlength=n_items).astype(float)
+	n = np.maximum(np.bincount(item, minlength=n_items), 1).astype(float)
 	inside = (x > 0.0) & (x < 1.0)
 	n_in = np.maximum(np.bincount(item, inside, n_items), 1.0)
 	x_in = np.where(inside, x, 0.0)
