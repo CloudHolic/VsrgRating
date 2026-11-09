@@ -54,7 +54,8 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 
 	refits = Refits(cfg, overrides, build_model(cfg), map_settings(cfg))
 	dataset = locate_dataset(Path(cfg.dataset_root), cfg.dataset.name)
-	bases = {response: locate_base(cfg, response, dataset.name) for response in cfg.responses}
+	pending = [r for r in cfg.responses if not (Path(cfg.runs_root) / cfg.name / r).exists()]
+	bases = {response: locate_base(cfg, response, dataset.name) for response in pending}
 
 	manifest = json.loads((dataset / "manifest.json").read_text(encoding="utf-8"))
 	anchors = manifest["anchors"]
@@ -89,10 +90,6 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 
 def locate_base(cfg: DictConfig, response: str, dataset_hash: str) -> Path:
 	"""The confirmed fit, checked to be comparable, before any refit starts."""
-	target = Path(cfg.runs_root) / cfg.name / response
-	if target.exists():
-		raise FileExistsError(f"{target} already holds a run")
-
 	path = locate_run(Path(cfg.runs_root), cfg.base, response, dataset_hash)
 	check_same(cfg, path)
 
