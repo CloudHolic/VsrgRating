@@ -4,8 +4,6 @@ uv run scripts/criteria.py +experiment=random3000_criteria_zoi_beta
 """
 
 import json
-import time
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -13,7 +11,7 @@ import jax
 import numpy as np
 import polars as pl
 import typer
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
 from vsrgrating.criteria import (
@@ -25,23 +23,10 @@ from vsrgrating.criteria import (
 	reproducibility,
 )
 from vsrgrating.data import Split, load_split, locate_dataset, subset
-from vsrgrating.evaluation import Fitted, load_run, locate_run
-from vsrgrating.fitting import build_model, fit_map_split, map_settings, run_tags, write_map
-from vsrgrating.irt.map import MAPConfig, Model
+from vsrgrating.evaluation import load_run, locate_run
+from vsrgrating.fitting import Refits, build_model, check_same, map_settings, refit, run_tags
 from vsrgrating.readout.grids import GRIDS
-from vsrgrating.tracking import METRICS, run_output, write_metrics
-
-COMPARED = ("model", "transform", "estimator")
-
-
-@dataclass(frozen=True)
-class Refits:
-	"""What every refit of this run shares."""
-
-	cfg: DictConfig
-	overrides: list[str]
-	model: Model
-	settings: MAPConfig
+from vsrgrating.tracking import run_output, write_metrics
 
 
 def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> None:
@@ -94,42 +79,6 @@ def locate_base(cfg: DictConfig, response: str, dataset_hash: str) -> Path:
 	check_same(cfg, path)
 
 	return path
-
-
-def check_same(cfg: DictConfig, path: Path) -> None:
-	"""Two fits compare only under one model and one estimator."""
-	other = OmegaConf.load(path / "config.yaml")
-	assert isinstance(other, DictConfig)
-
-	for key in COMPARED:
-		if cfg.get(key) != other.get(key):
-			raise ValueError(f"{path} differs from this run in {key}")
-
-
-def refit(refits: Refits, response: str, label: str, data: Split) -> Fitted:
-	"""The finished refit `response-label` if there is one, else a new fit kept as its own run."""
-	cfg = refits.cfg
-	part = f"{response}-{label}"
-	path = Path(cfg.runs_root) / cfg.name / part
-
-	if (path / METRICS).exists():
-		located = locate_run(Path(cfg.runs_root), cfg.name, part, data.dataset_hash)
-		check_same(cfg, located)
-		print(f"{part}: read back", flush=True)
-		return load_run(part, located)
-
-	with run_output(cfg, refits.overrides, part) as out:
-		start = time.perf_counter()
-		result = fit_map_split(refits.model, refits.settings, data)
-		runtime = time.perf_counter() - start
-
-		metrics = {"runtime_s": runtime, **write_map(out, refits.model, data, result)}
-		tags = {**run_tags(cfg, refits.model, data, response), "refit": label}
-		write_metrics(out, tags, metrics, {})
-
-	print(f"{part}: fitted in {runtime:.0f}s", flush=True)
-
-	return load_run(part, path)
 
 
 def reproducibility_table(

@@ -1,19 +1,36 @@
-"""A MAP fit of one split: its model and settings, its data-only start, and its run tables."""
+"""A MAP fit of one split: its model and settings, its data-only start, its run tables, and
+refits that are kept as runs and read back when they already exist."""
 
 import json
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import jax
 import jax.numpy as jnp
 import numpy as np
 import polars as pl
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 
 from .data import Split
+from .evaluation import Fitted, load_run, locate_run
 from .irt.cnrm.em import init_person_mean_ols
 from .irt.cnrm.transform import TransformSpec
 from .irt.map import MAPConfig, MAPResult, Model, cnrm_params, fit_map, zoi_moment_init, zoi_tau
 from .irt.zoi_beta.model import COORDS
+from .tracking import METRICS, run_output, write_metrics
+
+COMPARED = ("model", "transform", "estimator")
+
+
+@dataclass(frozen=True)
+class Refits:
+	"""What every refit of one run shares."""
+
+	cfg: DictConfig
+	overrides: list[str]
+	model: Model
+	settings: MAPConfig
 
 
 def build_model(cfg: DictConfig) -> Model:
@@ -110,6 +127,44 @@ def write_persons(out: Path, data: Split, eap: np.ndarray, psd: np.ndarray) -> N
 	pl.DataFrame({"person_idx": data.person_idx, "eap": eap, "psd": psd}).write_parquet(
 		out / "persons.parquet"
 	)
+
+
+def check_same(cfg: DictConfig, path: Path) -> None:
+	"""2 fits compare only under 1 model and 1 estimator."""
+	other = OmegaConf.load(path / "config.yaml")
+	assert isinstance(other, DictConfig)
+
+	for key in COMPARED:
+		if cfg.get(key) != other.get(key):
+			raise ValueError(f"{path} differs from this run in {key}")
+
+
+def refit(refits: Refits, response: str, label: str, data: Split) -> Fitted:
+	"""The finished refit `response-label` if there is one, else a new fit kept as its own run."""
+	cfg = refits.cfg
+	part = f"{response}-{label}"
+	path = Path(cfg.runs_root) / cfg.name / part
+
+	if (path / METRICS).exists():
+		located = locate_run(Path(cfg.runs_root), cfg.name, part, data.dataset_hash)
+		check_same(cfg, located)
+
+		print(f"{part}: read back", flush=True)
+
+		return load_run(part, located)
+
+	with run_output(cfg, refits.overrides, part) as out:
+		start = time.perf_counter()
+		result = fit_map_split(refits.model, refits.settings, data)
+		runtime = time.perf_counter() - start
+
+		metrics = {"runtime_s": runtime, **write_map(out, refits.model, data, result)}
+		tags = {**run_tags(cfg, refits.model, data, response), "refit": label}
+		write_metrics(out, tags, metrics, {})
+
+	print(f"{part}: fitted in {runtime:.0f}s", flush=True)
+
+	return load_run(part, path)
 
 
 def _write_transform(out: Path, spec: TransformSpec, raw: np.ndarray) -> None:

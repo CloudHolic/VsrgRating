@@ -1,0 +1,10 @@
+# @package _global_
+defaults:
+  - override /model: cnrm
+  - override /transform: pspline
+  - override /estimator: map
+
+name: random3000_ability_dimension
+estimator:
+  learning_rate: 0.005
+  final_lr_fraction: 0.02

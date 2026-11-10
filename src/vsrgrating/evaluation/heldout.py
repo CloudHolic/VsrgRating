@@ -59,6 +59,16 @@ def person_posterior(fitted: Fitted, data: Split) -> Posterior:
 	return Posterior(np.asarray(log_marginal), np.asarray(mean), np.asarray(sd))
 
 
+def person_grid(fitted: Fitted, data: Split, grid: np.ndarray) -> np.ndarray:
+	"""Each person's response log likelihood at every theta of `grid`, with no prior."""
+	nodes = jnp.asarray(grid)
+	acc = _accumulate(
+		fitted, data, lambda person: jnp.broadcast_to(nodes, (person.size, nodes.size))
+	)
+
+	return np.asarray(acc)
+
+
 def paired_difference(
 	a: np.ndarray, b: np.ndarray, n_boot: int = 4000, seed: int = 0
 ) -> tuple[float, float]:

@@ -1,0 +1,13 @@
+defaults:
+  - dataset: random3000
+  - model: cnrm
+  - transform: pspline
+  - estimator: map
+  - tracking: local
+  - _self_
+
+name: ???
+responses: [acc, score]
+split_seed: 20261110
+dataset_root: data/datasets
+runs_root: runs
