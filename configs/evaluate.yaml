@@ -8,5 +8,6 @@ responses: [acc, score]
 runs: ???
 reference: ???
 predictive: true
+min_train_responses: null
 dataset_root: data/datasets
 runs_root: runs

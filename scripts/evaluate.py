@@ -49,11 +49,16 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 	keys = pl.read_parquet(dataset / "items.parquet").sort("item_idx")["keys"].to_numpy()
 
 	for response, runs in fits.items():
+		train = load_split(dataset, response, "train")
 		test = load_split(dataset, response, "test")
+		judged = judged_cells(test, train, cfg.min_train_responses)
 
 		with run_output(cfg, overrides, response) as out:
-			tables = {"heldout": heldout(runs, cfg.reference, test)}
-			tables["heldout_breakdown"] = breakdown(runs, cfg.reference, test, keys)
+			tables = {"heldout": heldout(runs, cfg.reference, judged)}
+			tables["heldout_breakdown"] = breakdown(runs, cfg.reference, judged, keys)
+
+			if judged is not test:
+				tables["heldout_all"] = heldout(runs, cfg.reference, test)
 
 			if cfg.predictive:
 				train = load_split(dataset, response, "train")
@@ -77,6 +82,14 @@ def load_fits(cfg: DictConfig, response: str, dataset_hash: str) -> list[Fitted]
 		load_run(label, locate_run(root, experiment, response, dataset_hash))
 		for label, experiment in cfg.runs.items()
 	]
+
+
+def judged_cells(test: Split, train: Split, min_train_responses: int | None) -> Split:
+	if min_train_responses is None:
+		return test
+
+	counts = np.bincount(train.item, minlength=test.n_items)
+	return subset(test, counts[test.item] >= min_train_responses)
 
 
 def heldout(runs: list[Fitted], reference: str, test: Split) -> pl.DataFrame:

@@ -5,6 +5,7 @@ defaults:
 name: keys4to8_dimensions
 reference: d1
 predictive: false
+min_train_responses: 20
 runs:
   d1: keys4to8_cnrm_d1
   d2: keys4to8_cnrm_d2
