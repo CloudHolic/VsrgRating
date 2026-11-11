@@ -48,7 +48,8 @@ def _cnrm(
 	theta: np.ndarray,
 ) -> np.ndarray:
 	alpha, beta, sigma = (np.asarray(c)[item] for c in params)
-	latent = alpha * theta + beta + sigma * rng.standard_normal(theta.shape)
+	load = (alpha * theta).sum(axis=-1) if alpha.ndim == 2 else alpha * theta
+	latent = load + beta + sigma * rng.standard_normal(theta.shape)
 
 	# G rises as s falls, and np.interp wants its x increasing.
 	s = _S_GRID[::-1]

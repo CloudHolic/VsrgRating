@@ -23,8 +23,9 @@ from vsrgrating.criteria import (
 	reproducibility,
 )
 from vsrgrating.data import Split, load_split, locate_dataset, subset
-from vsrgrating.evaluation import load_run, locate_run
+from vsrgrating.evaluation import Fitted, load_run, locate_run
 from vsrgrating.fitting import Refits, build_model, check_same, map_settings, refit, run_tags
+from vsrgrating.irt.cnrm import model as cnrm
 from vsrgrating.readout.grids import GRIDS
 from vsrgrating.tracking import run_output, write_metrics
 
@@ -51,12 +52,14 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 	for response, base in bases.items():
 		data = load_split(dataset, response, "train")
 		grid = GRIDS[response]
-		values, domain = readouts.of(load_run("base", base), grid)
+
+		best_fit = load_run("base", base)
+		values, domain = readouts.of(best_fit, grid)
 
 		q3 = mapset.table(values, domain, ordered)
 		q4 = dan.table(anchors["dan"], items, values, domain)
 		q1 = reproducibility_table(refits, response, data, grid)
-		q2 = invariance_table(refits, response, data, base_theta(base, data), grid)
+		q2 = invariance_table(refits, response, data, base_theta(base, data, best_fit), grid)
 
 		rest = player_ordering.left_out(data, players)
 		fitted = refit(refits, response, "q5", rest)
@@ -116,14 +119,23 @@ def invariance_table(
 	return pl.concat(tables)
 
 
-def base_theta(path: Path, data: Split) -> np.ndarray:
+def base_theta(path: Path, data: Split, fitted: Fitted) -> np.ndarray:
 	"""The confirmed fit's EAP for each person of `data`."""
 	persons = pl.read_parquet(path / "persons.parquet").sort("person_idx")
 
 	if not np.array_equal(persons["person_idx"].to_numpy(), data.person_idx):
 		raise ValueError(f"{path} has other persons than the dataset")
 
-	return persons["eap"].to_numpy()
+	columns = [c for c in persons.columns if c == "eap" or c.startswith("eap_")]
+	theta = persons.select(columns).to_numpy()
+	if theta.shape[1] == 1:
+		return theta[:, 0]
+
+	item = fitted.item
+	assert isinstance(item, cnrm.ItemParams)
+
+	direction = np.asarray(item.alpha).mean(axis=0)
+	return theta @ (direction / np.linalg.norm(direction))
 
 
 if __name__ == "__main__":

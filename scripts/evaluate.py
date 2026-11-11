@@ -42,6 +42,10 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 
 	dataset = locate_dataset(Path(cfg.dataset_root), cfg.dataset.name)
 	fits = {response: load_fits(cfg, response, dataset.name) for response in cfg.responses}
+
+	if cfg.predictive and any(r.model.dims > 1 for runs in fits.values() for r in runs):
+		raise ValueError("the predictive checks are one-dimensional: pass predictive=false")
+
 	keys = pl.read_parquet(dataset / "items.parquet").sort("item_idx")["keys"].to_numpy()
 
 	for response, runs in fits.items():

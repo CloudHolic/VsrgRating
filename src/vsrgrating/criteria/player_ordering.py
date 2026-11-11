@@ -137,7 +137,7 @@ def evaluate(
 		"q5_charts": float(kept.size),
 		"q5_charts_unreadable": float(items.size - kept.size),
 		"q5_persons": float(persons.size),
-		"q5_persons_with_ability": float(np.isfinite(theta).sum()),
+		"q5_persons_with_ability": float(_measured(theta).sum()),
 	}
 
 	return summary, band_table, counts
@@ -217,7 +217,8 @@ def abilities(fitted: Fitted, data: Split, items: np.ndarray, persons: np.ndarra
 
 	cells = chosen[data.person] & ~inside[data.item]
 	measured = np.unique(data.person[cells])
-	theta = np.full(data.n_persons, np.nan)
+	mean = person_posterior(fitted, subset(data, cells)).mean
+	theta = np.full((data.n_persons, *mean.shape[1:]), np.nan)
 	theta[measured] = person_posterior(fitted, subset(data, cells)).mean
 
 	return theta[persons]
@@ -232,10 +233,14 @@ def _null(
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
 	"""The same statistics when the model is exactly right, per draw."""
 	people = theta[np.isfinite(theta)]
-	item = np.tile(items, NULL_DRAWS * people.size)
-	ability = np.repeat(np.tile(people, NULL_DRAWS), items.size)
+	n = people.shape[0]
+
+	item = np.tile(items, NULL_DRAWS * n)
+	ability = np.repeat(
+		np.tile(people, (NULL_DRAWS,) + (1,) * (people.ndim - 1)), items.size, axis=0
+	)
 	rng = np.random.default_rng(NULL_SEED)
-	drawn = simulate.draw(rng, fitted, item, ability).reshape(NULL_DRAWS, people.size, items.size)
+	drawn = simulate.draw(rng, fitted, item, ability).reshape(NULL_DRAWS, n, items.size)
 
 	rho = {name: np.empty(NULL_DRAWS) for name in values}
 	bands = {name: np.empty((NULL_DRAWS, edges.size + 1)) for name in values}
@@ -249,3 +254,9 @@ def _null(
 			weights[name][draw] = float(np.nanmedian(weighted_rate(flipped, gap)))
 
 	return rho, bands, weights
+
+
+def _measured(theta: np.ndarray) -> np.ndarray:
+	"""The persons with an ability, whether theta is (persons,) or (persons, D)."""
+	finite = np.isfinite(theta)
+	return finite if theta.ndim == 1 else finite.all(axis=1)

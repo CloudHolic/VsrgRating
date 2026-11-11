@@ -21,6 +21,8 @@ _NEWTON_CLIP = 0.5
 # With D >= 2 the extra axes start off zero: all-zero is a saddle where their gradient vanishes.
 _ALPHA_JITTER = 0.1
 _INIT_SEED = 20261111
+# Modes sought from 0 rather than from a previous step need more than 1 Newton round.
+_SUMMARY_ROUNDS = 5
 
 
 @dataclass(frozen=True)
@@ -234,15 +236,9 @@ def fit_map(
 		params, m1, m2 = _adam(params, grads, m1, m2, step + 1, lr)
 
 	params = best[1]
-	mode, scale = _modes(model, params, cells, n_persons, mode, model.dims == 1)
-	nodes, log_w = adaptive_nodes(mode, scale, x_h, log_w_h)
-	joint = _joint(model, params, cells, n_persons, nodes, log_w)
-	log_marginal = logsumexp(joint, axis=1)
-	post = jnp.exp(joint - log_marginal[:, None])
-
-	weight = post if nodes.ndim == 2 else post[..., None]
-	eap = (weight * nodes).sum(axis=1)
-	psd = jnp.sqrt((weight * (nodes - eap[:, None]) ** 2).sum(axis=1))
+	log_marginal, eap, psd = person_summary(
+		model, params, person, item, x, n_persons, config.n_nodes, mode
+	)
 
 	return MAPResult(
 		params={k: np.asarray(v) for k, v in params.items()},
@@ -253,6 +249,41 @@ def fit_map(
 		eap=np.asarray(eap),
 		psd=np.asarray(psd),
 	)
+
+
+def person_summary(
+	model: Model,
+	params: dict[str, Array],
+	person: np.ndarray,
+	item: np.ndarray,
+	x: np.ndarray,
+	n_persons: int,
+	n_nodes: int,
+	start: Array | None = None,
+) -> tuple[Array, Array, Array]:
+	"""Each person's log marginal likelihood, posterior mean and sd at `params`, by adaptive
+	Gauss-Hermite around the posterior mode. Without `start` the modes are sought from zero."""
+	cells = _cells(person, item, x)
+	x_h, log_w_h = hermite(n_nodes, model.dims)
+
+	if start is None:
+		mode = jnp.zeros(n_persons if model.dims == 1 else (n_persons, model.dims))
+		rounds = _SUMMARY_ROUNDS
+	else:
+		mode, rounds = start, 1
+
+	for _ in range(rounds):
+		mode, scale = _modes(model, params, cells, n_persons, mode, model.dims == 1)
+
+	nodes, log_w = adaptive_nodes(mode, scale, x_h, log_w_h)
+	joint = _joint(model, params, cells, n_persons, nodes, log_w)
+	log_marginal = logsumexp(joint, axis=1)
+	post = jnp.exp(joint - log_marginal[:, None])
+	weight = post if nodes.ndim == 2 else post[..., None]
+	eap = (weight * nodes).sum(axis=1)
+	psd = jnp.sqrt((weight * (nodes - eap[:, None]) ** 2).sum(axis=1))
+
+	return log_marginal, eap, psd
 
 
 def _cells(person: np.ndarray, item: np.ndarray, x: np.ndarray) -> Cells:

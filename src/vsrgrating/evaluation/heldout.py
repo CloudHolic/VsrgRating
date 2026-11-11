@@ -12,7 +12,7 @@ from jax.scipy.stats import norm
 
 from ..data import Split
 from ..irt.cnrm import model as cnrm
-from ..irt.map import Cells, Model
+from ..irt.map import Cells, Model, person_summary
 from ..irt.zoi_beta import model as zoi_beta
 from .fitted import Fitted
 
@@ -20,6 +20,8 @@ GRID = np.linspace(-12.0, 12.0, 6001)
 LOCAL_HALF_WIDTH = 0.01
 LOCAL_POINTS = 2001
 CHUNK = 512
+# Nodes per axis for D >= 2, where a grid over theta is too large.
+HELDOUT_NODES = {2: 21, 3: 11}
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,9 @@ class Posterior:
 
 def person_posterior(fitted: Fitted, data: Split) -> Posterior:
 	"""Log marginal likelihood (global + local grid) and posterior moments (global grid)."""
+	if fitted.model.dims > 1:
+		return _posterior_nodes(fitted, data)
+
 	grid = jnp.asarray(GRID)
 	log_w = norm.logpdf(grid) + np.log(GRID[1] - GRID[0])
 
@@ -100,6 +105,24 @@ def _accumulate(fitted: Fitted, data: Split, theta_rows: Callable[[Array], Array
 	assert total is not None
 
 	return total[: data.n_persons]
+
+
+def _posterior_nodes(fitted: Fitted, data: Split) -> Posterior:
+	item = fitted.item
+	assert isinstance(item, cnrm.ItemParams) and fitted.raw is not None
+
+	params = {
+		"alpha": item.alpha,
+		"beta": item.beta,
+		"log_sigma": jnp.log(item.sigma),
+		"transform": fitted.raw,
+	}
+	nodes = HELDOUT_NODES[fitted.model.dims]
+	log_marginal, mean, sd = person_summary(
+		fitted.model, params, data.person, data.item, data.x, data.n_persons, nodes
+	)
+
+	return Posterior(np.asarray(log_marginal), np.asarray(mean), np.asarray(sd))
 
 
 @partial(jax.jit, static_argnames=("model", "n_persons"))
