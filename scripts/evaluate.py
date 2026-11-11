@@ -61,7 +61,6 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 				tables["heldout_all"] = heldout(runs, cfg.reference, test)
 
 			if cfg.predictive:
-				train = load_split(dataset, response, "train")
 				tables |= predictive(runs, cfg.reference, train, THRESHOLDS[response])
 
 			for name, table in tables.items():
