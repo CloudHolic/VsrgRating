@@ -20,7 +20,7 @@ def of(fitted: Fitted, grid: tuple[float, ...]) -> tuple[dict[str, np.ndarray], 
 		assert fitted.model.transform is not None and fitted.raw is not None
 
 		spec, raw = fitted.model.transform, fitted.raw
-		values = {_name("b½", y): cnrm.difficulty(item, spec, raw, y) for y in grid}
+		values = {_name("d", y): cnrm.difficulty(item, spec, raw, y) for y in grid}
 		return values, np.ones(item.beta.shape, dtype=bool)
 
 	values = {}
