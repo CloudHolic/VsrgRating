@@ -15,6 +15,7 @@ from .manifest import content_hash, make_manifest
 from .query import connect, fetch_beatmaps, fetch_cells, fetch_ingest_log, fetch_view_definitions
 from .sampling import (
 	allocate,
+	allocate_keys,
 	sample_items,
 	sample_units,
 	spawn_rngs,
@@ -45,11 +46,19 @@ def build(config: DatasetConfig, dsn: str, out_root: Path) -> Path:
 
 		core = k_core(cells, config.min_item_responses, config.min_person_responses, pl.lit(True))
 		stages["core"] = _size(core)
-		units, n_eligible_units = _choose_units(conn, core, config.mapset_items, rngs["units"])
+		units, n_eligible_units = _choose_units(
+			conn, core, config.mapset_items, config.key_items, rngs["units"]
+		)
 
 	candidates = core.group_by(*ITEM_KEY, "keys").len("n_responses").sort("keys", *ITEM_KEY)
+
 	eligible = dict(candidates.group_by("keys").len().iter_rows())
-	allocation = allocate(eligible, config.n_items)
+	if config.key_items is None:
+		assert config.n_items is not None
+		allocation = allocate(eligible, config.n_items)
+	else:
+		allocation = allocate_keys(eligible, config.key_items)
+
 	picked = sample_items(candidates, allocation, rngs["items"])
 
 	nm = pl.col("rate_group") == "NM"
@@ -133,14 +142,22 @@ def build(config: DatasetConfig, dsn: str, out_root: Path) -> Path:
 
 
 def _choose_units(
-	conn: psycopg.Connection, core: pl.DataFrame, target: int, rng: np.random.Generator
+	conn: psycopg.Connection,
+	core: pl.DataFrame,
+	target: int,
+	key_items: dict[int, int | None] | None,
+	rng: np.random.Generator,
 ) -> tuple[pl.DataFrame, int]:
 	"""Mapset units among the core's NM charts, drawn up to `target` charts, and how many were
-	eligible."""
+	eligible. With `key_items`, only its key modes give units."""
 	if target == 0:
 		return pl.DataFrame(schema=UNIT_SCHEMA), 0
 
-	charts = core.filter(pl.col("rate_group") == "NM").select("beatmap_id", "keys").unique()
+	nm = core.filter(pl.col("rate_group") == "NM")
+	if key_items is not None:
+		nm = nm.filter(pl.col("keys").is_in(list(key_items)))
+
+	charts = nm.select("beatmap_id", "keys").unique()
 	beatmaps = fetch_beatmaps(conn, charts["beatmap_id"].to_list()).join(charts, on="beatmap_id")
 	eligible = eligible_units(beatmaps)
 

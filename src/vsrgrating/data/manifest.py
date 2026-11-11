@@ -23,11 +23,14 @@ RULES = {
 	"core": "k-core of the pool: items with at least min_item_responses responses and persons "
 	"with at least min_person_responses, repeated until neither changes.",
 	"items": "Drawn uniformly within each key mode of the core; key modes get items in "
-	"proportion to their core counts, at least one each. The anchor items below are added.",
-	"anchors": "C5: (beatmapset, keys) units of the core's NM charts whose difficulty names give "
-	"their order, drawn in a seeded order until mapset_items charts. C6: the dan course charts "
-	"(NM), taken from the pool without the core. A unit is listed only with the charts left "
-	"in the final dataset, and only if at least two remain.",
+	"proportion to their core counts, at least one each, or with key_items the given count "
+	"per listed key mode (every eligible item where null) and none of the rest. The anchor "
+	"items below are added.",
+	"anchors": "Q3: (beatmapset, keys) units of the core's NM charts whose difficulty names give "
+	"their order (only key_items' key modes when given), drawn in a seeded order until "
+	"mapset_items charts. Q4: the dan course charts (NM), taken from the pool without the core. "
+	"A unit is listed only with the charts left in the final dataset, and only if at least two "
+	"remain.",
 	"persons": "Persons with at least min_person_responses responses on the drawn items; "
 	"n_persons of them drawn uniformly (all if null) and split into train and test (all "
 	"train if test_fraction is null).",
@@ -60,7 +63,8 @@ def make_manifest(
 	train = split.filter(pl.col("split") == "train")
 	kept = dict(items.group_by("keys").len().iter_rows())
 	return {
-		"config": asdict(config),
+		# Without key_items the config reads as it did before the field existed.
+		"config": {k: v for k, v in asdict(config).items() if k != "key_items" or v is not None},
 		"seed_streams": list(STREAMS),
 		"rules": RULES,
 		"query": CELLS_COPY,

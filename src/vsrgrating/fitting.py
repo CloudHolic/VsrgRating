@@ -37,7 +37,7 @@ def build_model(cfg: DictConfig) -> Model:
 	"""The model, rejecting an estimator that does not apply to it."""
 	transform = cfg.get("transform")
 	spec = None if transform is None else TransformSpec.from_config(transform)
-	model = Model(cfg.model.family, spec)
+	model = Model(cfg.model.family, spec, cfg.model.get("dims", 1))
 
 	kind = cfg.estimator.kind
 	if kind == "nuts" and model.family != "zoi_beta":
@@ -74,6 +74,8 @@ def run_tags(cfg: DictConfig, model: Model, data: Split, response: str) -> dict[
 	}
 	if model.transform is not None:
 		tags["transform"] = model.transform.kind
+	if model.dims > 1:
+		tags["dims"] = str(model.dims)
 
 	return tags
 
@@ -83,7 +85,7 @@ def fit_map_split(model: Model, config: MAPConfig, data: Split) -> MAPResult:
 	if model.family == "cnrm":
 		assert model.transform is not None
 		ols = init_person_mean_ols(data.person, data.item, data.x, data.n_persons, data.n_items)
-		init = cnrm_params(*ols, model.transform)
+		init = cnrm_params(*ols, model.transform, model.dims)
 	else:
 		init = zoi_moment_init(data.item, data.x, data.n_items)
 
@@ -96,8 +98,9 @@ def write_map(out: Path, model: Model, data: Split, result: MAPResult) -> dict[s
 
 	if model.family == "cnrm":
 		assert model.transform is not None
+		alpha = np.exp(p["log_alpha"]) if "log_alpha" in p else p["alpha"]
 		items = {
-			"alpha": np.exp(p["log_alpha"]),
+			**_columns("alpha", alpha),
 			"beta": p["beta"],
 			"sigma": np.exp(p["log_sigma"]),
 		}
@@ -124,9 +127,8 @@ def write_map(out: Path, model: Model, data: Split, result: MAPResult) -> dict[s
 
 def write_persons(out: Path, data: Split, eap: np.ndarray, psd: np.ndarray) -> None:
 	"""persons.parquet: each person's EAP and posterior sd."""
-	pl.DataFrame({"person_idx": data.person_idx, "eap": eap, "psd": psd}).write_parquet(
-		out / "persons.parquet"
-	)
+	columns = {"person_idx": data.person_idx, **_columns("eap", eap), **_columns("psd", psd)}
+	pl.DataFrame(columns).write_parquet(out / "persons.parquet")
 
 
 def check_same(cfg: DictConfig, path: Path) -> None:
@@ -179,3 +181,12 @@ def _write_transform(out: Path, spec: TransformSpec, raw: np.ndarray) -> None:
 		).tolist(),
 	}
 	(out / "transform.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
+def _columns(name: str, value: np.ndarray) -> dict[str, np.ndarray]:
+	"""One column for a vector, `name_1 ... name_D` for an (n, D) matrix."""
+	value = np.asarray(value)
+	if value.ndim == 1:
+		return {name: value}
+
+	return {f"{name}_{k + 1}": value[:, k] for k in range(value.shape[1])}

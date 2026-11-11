@@ -41,6 +41,21 @@ def allocate(eligible: dict[int, int], n_items: int) -> dict[int, int]:
 	return alloc
 
 
+def allocate_keys(eligible: dict[int, int], key_items: dict[int, int | None]) -> dict[int, int]:
+	"""The requested count per key mode, every eligible item where the request is None."""
+	alloc = {}
+	for k, wanted in sorted(key_items.items()):
+		available = eligible.get(k, 0)
+		count = available if wanted is None else wanted
+
+		if count < 1 or count > available:
+			raise ValueError(f"{k}K: {wanted} requested, {available} eligible")
+
+		alloc[k] = count
+
+	return alloc
+
+
 def sample_items(
 	eligible: pl.DataFrame, allocation: dict[int, int], rng: np.random.Generator
 ) -> pl.DataFrame:

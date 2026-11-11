@@ -34,7 +34,15 @@ def load_run(name: str, path: Path, chains: tuple[int, ...] | None = None) -> Fi
 
 	if family == "cnrm":
 		items = pl.read_parquet(path / "items.parquet").sort("item_idx")
-		item = cnrm.ItemParams(*(jnp.asarray(items[c].to_numpy()) for c in cnrm.ItemParams._fields))
+		dims = sum(c.startswith("alpha_") for c in items.columns) or 1
+		names = ["alpha"] if dims == 1 else [f"alpha_{k}" for k in range(1, dims + 1)]
+		alpha = items.select(names).to_numpy()
+		item = cnrm.ItemParams(
+			jnp.asarray(alpha[:, 0] if dims == 1 else alpha),
+			jnp.asarray(items["beta"].to_numpy()),
+			jnp.asarray(items["sigma"].to_numpy()),
+		)
+
 		if kind == "em":
 			spec = TransformSpec("linear")
 			return Fitted(name, Model("cnrm", spec), item, spec.init(), kind)
@@ -43,7 +51,7 @@ def load_run(name: str, path: Path, chains: tuple[int, ...] | None = None) -> Fi
 		spec = TransformSpec(record["kind"], tuple(record["knots"]), record["penalty"])
 		raw = jnp.asarray(record["raw"]).reshape(spec.init().shape)
 
-		return Fitted(name, Model("cnrm", spec), item, raw, kind)
+		return Fitted(name, Model("cnrm", spec, dims), item, raw, kind)
 
 	if kind == "map":
 		wide = pl.read_parquet(path / "items.parquet")

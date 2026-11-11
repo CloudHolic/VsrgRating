@@ -28,7 +28,11 @@ def log_k(
 	`scale` is (G(x), log G'(x)) from a response-scale transform (TransformSpec.apply), evaluated
 	at the interior responses; None is the paper's linear v, G(x) = x.
 	"""
-	mu = item.alpha * theta + item.beta
+	if item.alpha.ndim > item.beta.ndim:
+		mu = (item.alpha * theta).sum(axis=-1) + item.beta
+	else:
+		mu = item.alpha * theta + item.beta
+
 	part = partition(x)
 	g, log_dg = (x, 0.0) if scale is None else scale
 	interior = norm.logpdf((g - mu) / item.sigma) - jnp.log(item.sigma) + log_dg

@@ -17,10 +17,21 @@ class DatasetConfig:
 	seed: int
 	mapset_items: int = 0
 	dan_courses: bool = False
+	key_items: dict[int, int | None] | None = None
 
 	def __post_init__(self) -> None:
-		if self.n_items < 1:
+		if (self.n_items is None) == (self.key_items is None):
+			raise ValueError("give exactly one of n_items and key_items")
+
+		if self.n_items is not None and self.n_items < 1:
 			raise ValueError(f"n_items must be positive, got {self.n_items}")
+
+		if self.key_items is not None:
+			plain = {int(k): v for k, v in self.key_items.items()}
+			if not plain or any(v is not None and v < 1 for v in plain.values()):
+				raise ValueError(f"key_items needs positive counts or null, got {plain}")
+
+			object.__setattr__(self, "key_items", plain)
 
 		for field in ("min_item_responses", "min_person_responses", "min_item_train_responses"):
 			if getattr(self, field) < 1:

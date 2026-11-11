@@ -18,6 +18,9 @@ from .zoi_beta import model as zoi_beta
 
 _NEWTON_STEPS = 8
 _NEWTON_CLIP = 0.5
+# With D >= 2 the extra axes start off zero: all-zero is a saddle where their gradient vanishes.
+_ALPHA_JITTER = 0.1
+_INIT_SEED = 20261111
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,12 @@ class Model:
 
 	family: str
 	transform: TransformSpec | None = None
+	dims: int = 1
 
 	def __post_init__(self) -> None:
+		if self.dims < 1 or (self.dims > 1 and self.family != "cnrm"):
+			raise ValueError(f"only the cnrm takes dims > 1, got {self.family} with {self.dims}")
+
 		if self.family == "cnrm":
 			if self.transform is None:
 				raise ValueError("cnrm needs a transform (kind: linear for the paper's v)")
@@ -64,9 +71,8 @@ class Model:
 	def item_params(self, params: dict[str, Array]) -> zoi_beta.ItemParams | cnrm.ItemParams:
 		"""The model's coordinates from the optimizer's."""
 		if self.family == "cnrm":
-			return cnrm.ItemParams(
-				jnp.exp(params["log_alpha"]), params["beta"], jnp.exp(params["log_sigma"])
-			)
+			alpha = jnp.exp(params["log_alpha"]) if "log_alpha" in params else params["alpha"]
+			return cnrm.ItemParams(alpha, params["beta"], jnp.exp(params["log_sigma"]))
 
 		return zoi_beta.ItemParams(*zoi_tau(params))
 
@@ -78,8 +84,11 @@ class Model:
 		theta: Array,
 	) -> Array:
 		"""log k at every cell from the model's coordinates; `raw` is G's parameters (cnrm only)."""
-		col = (lambda v: v[cells.item]) if theta.ndim == 1 else (lambda v: v[cells.item][:, None])
-		x = cells.x if theta.ndim == 1 else cells.x[:, None]
+		# theta is (cells,) or (cells, nodes) in 1 dimension, with a trailing D axis in more.
+		on_nodes = theta.ndim > (1 if self.dims == 1 else 2)
+
+		col = (lambda v: v[cells.item][:, None]) if on_nodes else (lambda v: v[cells.item])
+		x = cells.x[:, None] if on_nodes else cells.x
 		picked = jax.tree.map(col, item)
 
 		if self.family == "cnrm":
@@ -87,7 +96,7 @@ class Model:
 			assert raw is not None
 
 			g, log_dg = self.transform.apply(raw, cells.x_in)
-			scale = (g, log_dg) if theta.ndim == 1 else (g[:, None], log_dg[:, None])
+			scale = (g[:, None], log_dg[:, None]) if on_nodes else (g, log_dg)
 
 			return cnrm.log_k(x, theta, picked, scale)
 
@@ -158,15 +167,23 @@ def zoi_params(
 
 
 def cnrm_params(
-	alpha: np.ndarray, beta: np.ndarray, sigma: np.ndarray, spec: TransformSpec
+	alpha: np.ndarray, beta: np.ndarray, sigma: np.ndarray, spec: TransformSpec, dims: int = 1
 ) -> dict[str, Array]:
 	"""The optimizer's coordinates: (log alpha, beta, log sigma) as in the paper, plus G's."""
-	return {
-		"log_alpha": jnp.asarray(np.log(np.maximum(np.asarray(alpha), 1e-3))),
+	result = {
 		"beta": jnp.asarray(beta),
 		"log_sigma": jnp.asarray(np.log(sigma)),
 		"transform": spec.init(),
 	}
+
+	if dims == 1:
+		result["log_alpha"] = jnp.asarray(np.log(np.maximum(np.asarray(alpha), 1e-3)))
+	else:
+		start = np.random.default_rng(_INIT_SEED).normal(0.0, _ALPHA_JITTER, (len(alpha), dims))
+		start[:, 0] = np.maximum(np.asarray(alpha), 1e-3)
+		result["alpha"] = jnp.asarray(start)
+
+	return result
 
 
 def fit_map(
@@ -181,18 +198,19 @@ def fit_map(
 ) -> MAPResult:
 	"""Adam on the AGHQ-marginalized MAP objective, keeping the best iterate."""
 	cells = _cells(person, item, x)
-	x_h, log_w_h = hermite(config.n_nodes)
+	x_h, log_w_h = hermite(config.n_nodes, model.dims)
 	params = init
 
 	m1 = jax.tree_util.tree_map(jnp.zeros_like, params)
 	m2 = jax.tree_util.tree_map(jnp.zeros_like, params)
-	mode = jnp.zeros(n_persons)
+	mode = jnp.zeros(n_persons if model.dims == 1 else (n_persons, model.dims))
 
 	trace: list[float] = []
 	best = (np.inf, params, 0)
 
 	for step in range(config.steps):
-		mode, scale = _modes(model, params, cells, n_persons, mode, step % config.scan_every == 0)
+		scan = model.dims == 1 and step % config.scan_every == 0
+		mode, scale = _modes(model, params, cells, n_persons, mode, scan)
 		nodes, log_w = adaptive_nodes(mode, scale, x_h, log_w_h)
 
 		value, grads = _value_and_grad(
@@ -216,13 +234,15 @@ def fit_map(
 		params, m1, m2 = _adam(params, grads, m1, m2, step + 1, lr)
 
 	params = best[1]
-	mode, scale = _modes(model, params, cells, n_persons, mode, True)
+	mode, scale = _modes(model, params, cells, n_persons, mode, model.dims == 1)
 	nodes, log_w = adaptive_nodes(mode, scale, x_h, log_w_h)
 	joint = _joint(model, params, cells, n_persons, nodes, log_w)
 	log_marginal = logsumexp(joint, axis=1)
 	post = jnp.exp(joint - log_marginal[:, None])
-	eap = (post * nodes).sum(axis=1)
-	psd = jnp.sqrt((post * (nodes - eap[:, None]) ** 2).sum(axis=1))
+
+	weight = post if nodes.ndim == 2 else post[..., None]
+	eap = (weight * nodes).sum(axis=1)
+	psd = jnp.sqrt((weight * (nodes - eap[:, None]) ** 2).sum(axis=1))
 
 	return MAPResult(
 		params={k: np.asarray(v) for k, v in params.items()},
@@ -300,7 +320,9 @@ def _modes(
 ) -> tuple[Array, Array]:
 	def log_post(theta: Array) -> Array:
 		lk = model.cell_log_k(params, cells, theta[cells.person])
-		return jax.ops.segment_sum(lk, cells.person, num_segments=n_persons) + norm.logpdf(theta)
+		prior = norm.logpdf(theta)
+		segment = jax.ops.segment_sum(lk, cells.person, num_segments=n_persons)
+		return segment + (prior if theta.ndim == 1 else prior.sum(axis=-1))
 
 	return posterior_modes(log_post, start, steps=_NEWTON_STEPS, clip=_NEWTON_CLIP, scan=scan)
 
