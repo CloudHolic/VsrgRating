@@ -1,0 +1,11 @@
+# @package _global_
+defaults:
+  - override /dataset: keys4to8
+
+name: keys4to8_dimensions
+reference: d1
+predictive: false
+runs:
+  d1: keys4to8_cnrm_d1
+  d2: keys4to8_cnrm_d2
+  d3: keys4to8_cnrm_d3

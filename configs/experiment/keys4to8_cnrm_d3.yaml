@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /dataset: keys4to8
+  - override /model: cnrm
+  - override /transform: pspline
+  - override /estimator: map
+
+name: keys4to8_cnrm_d3
+model:
+  dims: 3
+estimator:
+  n_nodes: 5
+  learning_rate: 0.005
+  final_lr_fraction: 0.02
