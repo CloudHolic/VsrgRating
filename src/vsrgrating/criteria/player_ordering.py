@@ -218,8 +218,9 @@ def abilities(fitted: Fitted, data: Split, items: np.ndarray, persons: np.ndarra
 	cells = chosen[data.person] & ~inside[data.item]
 	measured = np.unique(data.person[cells])
 	mean = person_posterior(fitted, subset(data, cells)).mean
+
 	theta = np.full((data.n_persons, *mean.shape[1:]), np.nan)
-	theta[measured] = person_posterior(fitted, subset(data, cells)).mean
+	theta[measured] = mean
 
 	return theta[persons]
 
@@ -232,7 +233,7 @@ def _null(
 	edges: np.ndarray,
 ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray]]:
 	"""The same statistics when the model is exactly right, per draw."""
-	people = theta[np.isfinite(theta)]
+	people = theta[_measured(theta)]
 	n = people.shape[0]
 
 	item = np.tile(items, NULL_DRAWS * n)
