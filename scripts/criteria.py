@@ -1,4 +1,4 @@
-"""Validity criteria Q1-Q5 for one model's readouts, each response in turn.
+"""Validity criteria for one model's readouts, each response in turn.
 
 uv run scripts/criteria.py +experiment=random3000_criteria_zoi_beta
 """
@@ -18,6 +18,7 @@ from vsrgrating.criteria import (
 	dan,
 	invariance,
 	mapset,
+	personal_order,
 	player_ordering,
 	readouts,
 	reproducibility,
@@ -29,7 +30,7 @@ from vsrgrating.irt.cnrm import model as cnrm
 from vsrgrating.readout.grids import GRIDS
 from vsrgrating.tracking import run_output, write_metrics
 
-CHECKS = ("q1", "q2", "q3", "q4", "q5")
+CHECKS = ("q1", "q2", "q3", "q4", "q5", "q5p")
 
 
 def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> None:
@@ -80,6 +81,10 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 			tables["q5"], tables["q5_bands"], counts = player_ordering.evaluate(
 				fitted, data, rest, chart_set, players, grid
 			)
+		if "q5p" in cfg.checks:
+			keys = items.sort("item_idx")["keys"].to_numpy()
+			test = load_split(dataset, response, "test")
+			tables["q5p"] = personal_order.table(best_fit, test, keys)
 
 		with run_output(cfg, overrides, response) as out:
 			for name, table in tables.items():

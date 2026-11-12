@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /dataset: keys4to8
+  - override /model: cnrm
+  - override /transform: pspline
+  - override /estimator: map
+
+name: keys4to8_criteria_d1
+base: keys4to8_cnrm_d1
+checks: [q2, q5p]
+responses: [acc]
+estimator:
+  learning_rate: 0.005
+  final_lr_fraction: 0.02
