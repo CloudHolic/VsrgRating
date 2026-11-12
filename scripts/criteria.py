@@ -29,6 +29,8 @@ from vsrgrating.irt.cnrm import model as cnrm
 from vsrgrating.readout.grids import GRIDS
 from vsrgrating.tracking import run_output, write_metrics
 
+CHECKS = ("q1", "q2", "q3", "q4", "q5")
+
 
 def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> None:
 	overrides = overrides or []
@@ -37,6 +39,9 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 
 	if cfg.tracking.mlflow:
 		raise ValueError("criteria read their refits back from disk: use tracking=local")
+
+	if unknown := set(cfg.checks) - set(CHECKS):
+		raise ValueError(f"unknown checks {sorted(unknown)}; pick from {CHECKS}")
 
 	refits = Refits(cfg, overrides, build_model(cfg), map_settings(cfg))
 	dataset = locate_dataset(Path(cfg.dataset_root), cfg.dataset.name)
@@ -47,7 +52,9 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 	anchors = manifest["anchors"]
 	items = pl.read_parquet(dataset / "items.parquet")
 	ordered = mapset.pairs(anchors["mapset"]["units"], items)
-	chart_set, players = player_ordering.common_set(load_split(dataset, "acc", "train"))
+
+	if "q5" in cfg.checks:
+		chart_set, players = player_ordering.common_set(load_split(dataset, "acc", "train"))
 
 	for response, base in bases.items():
 		data = load_split(dataset, response, "train")
@@ -56,19 +63,25 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 		best_fit = load_run("base", base)
 		values, domain = readouts.of(best_fit, grid)
 
-		q3 = mapset.table(values, domain, ordered)
-		q4 = dan.table(anchors["dan"], items, values, domain)
-		q1 = reproducibility_table(refits, response, data, grid)
-		q2 = invariance_table(refits, response, data, base_theta(base, data, best_fit), grid)
+		tables, counts = {}, {}
 
-		rest = player_ordering.left_out(data, players)
-		fitted = refit(refits, response, "q5", rest)
-		q5, q5_bands, counts = player_ordering.evaluate(
-			fitted, data, rest, chart_set, players, grid
-		)
+		if "q3" in cfg.checks:
+			tables["q3"] = mapset.table(values, domain, ordered)
+		if "q4" in cfg.checks:
+			tables["q4"] = dan.table(anchors["dan"], items, values, domain)
+		if "q1" in cfg.checks:
+			tables["q1"] = reproducibility_table(refits, response, data, grid)
+		if "q2" in cfg.checks:
+			theta = base_theta(base, data, best_fit)
+			tables["q2"] = invariance_table(refits, response, data, theta, grid)
+		if "q5" in cfg.checks:
+			rest = player_ordering.left_out(data, players)
+			fitted = refit(refits, response, "q5", rest)
+			tables["q5"], tables["q5_bands"], counts = player_ordering.evaluate(
+				fitted, data, rest, chart_set, players, grid
+			)
 
 		with run_output(cfg, overrides, response) as out:
-			tables = {"q1": q1, "q2": q2, "q3": q3, "q4": q4, "q5": q5, "q5_bands": q5_bands}
 			for name, table in tables.items():
 				table.write_csv(out / f"{name}.csv")
 

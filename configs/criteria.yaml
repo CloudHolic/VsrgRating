@@ -9,6 +9,7 @@ defaults:
 name: ???
 base: ???
 responses: [acc, score]
+checks: [q1, q2, q3, q4, q5]
 q1:
   repeats: 10
   seed: 20260916

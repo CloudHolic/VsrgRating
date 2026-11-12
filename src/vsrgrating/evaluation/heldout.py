@@ -21,7 +21,7 @@ LOCAL_HALF_WIDTH = 0.01
 LOCAL_POINTS = 2001
 CHUNK = 512
 # Nodes per axis for D >= 2, where a grid over theta is too large.
-HELDOUT_NODES = {2: 21, 3: 11}
+HELDOUT_NODES = {2: 21, 3: 11, 4: 6}
 
 
 @dataclass(frozen=True)

@@ -92,12 +92,15 @@ def judged_cells(test: Split, train: Split, min_train_responses: int | None) -> 
 
 
 def heldout(runs: list[Fitted], reference: str, test: Split) -> pl.DataFrame:
-	"""Each fit's held-out log marginal likelihood, paired against the reference over persons."""
+	"""Each fit's held-out log marginal likelihood, paired over persons against the reference and
+	against the run listed before it."""
 	ll = {r.name: person_posterior(r, test).log_marginal for r in runs}
 	rows = []
 
-	for r in runs:
+	for previous, r in zip([runs[0], *runs], runs, strict=False):
 		diff, se = paired_difference(ll[reference], ll[r.name])
+		step, step_se = paired_difference(ll[previous.name], ll[r.name])
+
 		rows.append(
 			{
 				"run": r.name,
@@ -106,6 +109,8 @@ def heldout(runs: list[Fitted], reference: str, test: Split) -> pl.DataFrame:
 				"per_cell": float(ll[r.name].sum() / test.x.size),
 				"diff": diff,
 				"se": se,
+				"step_diff": step,
+				"step_se": step_se,
 			}
 		)
 

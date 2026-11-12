@@ -1,0 +1,13 @@
+# @package _global_
+defaults:
+  - override /dataset: keys4to8
+
+name: keys4to8_dimensions_thick
+reference: d1
+predictive: false
+min_train_responses: 100
+runs:
+  d1: keys4to8_cnrm_d1
+  d2: keys4to8_cnrm_d2
+  d3: keys4to8_cnrm_d3
+  d4: keys4to8_cnrm_d4
