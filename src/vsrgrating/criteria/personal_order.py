@@ -70,7 +70,7 @@ def halves(rng: np.random.Generator, data: Split) -> tuple[np.ndarray, np.ndarra
 
 
 def margin(fitted: Fitted, cells: Split, theta: np.ndarray) -> np.ndarray:
-	"""(alpha . theta + beta - G(y)) / sigma for each cell: 
+	"""(alpha . theta + beta - G(y)) / sigma for each cell:
 	in the same order as P(Y >= y | theta)."""
 	assert fitted.model.transform is not None and fitted.raw is not None
 
