@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.14"
 resolution-markers = [
     "sys_platform == 'win32'",
@@ -3273,6 +3273,18 @@ wheels = [
 ]
 
 [[package]]
+name = "urc-converter"
+version = "0.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/11/26/b283aa500daf2250313752fbaf7fdb4f7521fd3d7923c1b805fe7d52d865/urc_converter-0.1.0.tar.gz", hash = "sha256:1359639c17046e97d5926a81e4cf46e5aed10a25fbd26f4e8f506a72cf8b439e", size = 30550, upload-time = "2026-09-22T03:08:15.516Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/01/e8/e2062ad2d0cac82071721f3c56686456dc5f5b8532e29856a14d5a9d1387/urc_converter-0.1.0-py3-none-any.whl", hash = "sha256:e9a1cf8bca5dffa01cef09ece570caec71de65cac21328ca85f4b008eb735d69", size = 39892, upload-time = "2026-09-22T03:08:13.964Z" },
+]
+
+[[package]]
 name = "urllib3"
 version = "2.8.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3298,6 +3310,10 @@ wheels = [
 name = "vsrgrating"
 version = "0.1.0"
 source = { editable = "." }
+default-groups = ["dev", "research"]
+dependencies = [
+    { name = "urc-converter" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -3324,6 +3340,7 @@ research = [
 ]
 
 [package.metadata]
+requires-dist = [{ name = "urc-converter", specifier = ">=0.1.0" }]
 
 [package.metadata.requires-dev]
 dev = [
