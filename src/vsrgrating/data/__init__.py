@@ -16,5 +16,5 @@ __all__ = [
 	"load_split",
 	"locate_dataset",
 	"split_persons",
-	"subset"
+	"subset",
 ]

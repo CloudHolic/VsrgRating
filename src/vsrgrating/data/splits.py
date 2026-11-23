@@ -8,9 +8,7 @@ TEST_THRESHOLD = 1_000
 TEST_FRACTION = TEST_THRESHOLD / TEST_MODULUS
 
 # The 7K dan course mapsets, held out so the final evaluation can check the course order.
-TEST_PINNED_MAPSETS: frozenset[int] = frozenset(
-	{450069, 450649, 451788, 895138, 930218, 1220647}
-)
+TEST_PINNED_MAPSETS: frozenset[int] = frozenset({450069, 450649, 451788, 895138, 930218, 1220647})
 
 
 def is_test_mapset(beatmapset_id: int) -> bool:
@@ -21,8 +19,6 @@ def is_test_mapset(beatmapset_id: int) -> bool:
 	if beatmapset_id in TEST_PINNED_MAPSETS:
 		return True
 
-	digest = hashlib.blake2b(
-		f"{TEST_SALT}:{beatmapset_id}".encode(), digest_size=8
-	).digest()
+	digest = hashlib.blake2b(f"{TEST_SALT}:{beatmapset_id}".encode(), digest_size=8).digest()
 
 	return int.from_bytes(digest, "big") % TEST_MODULUS < TEST_THRESHOLD
