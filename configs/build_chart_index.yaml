@@ -1,0 +1,6 @@
+dsn: ${oc.env:DSN}
+archive: data/raw/2026_11_05_osu_files.tar.bz2
+external_root: data/raw/external
+out_root: data/charts
+name: null
+sources: [osu_archive, osu_external, etterna, quaver, bms_sabun, bms_package]

@@ -1,0 +1,6 @@
+dataset_root: data/datasets
+dataset: keys4to8
+charts_root: data/charts
+chart_index: ???
+out_root: data/splits
+seed: 20261120

@@ -75,3 +75,20 @@ def fetch_beatmaps(conn: psycopg.Connection, beatmap_ids: list[int]) -> pl.DataF
 		schema={"beatmap_id": pl.Int64, "beatmapset_id": pl.Int64, "version": pl.String},
 		orient="row",
 	)
+
+
+def fetch_mania_beatmaps(conn: psycopg.Connection) -> pl.DataFrame:
+	"""Every osu!mania chart in the database with its beatmapset and key count."""
+	with conn.cursor() as cur:
+		rows = cur.execute("SELECT beatmap_id, beatmapset_id, keys FROM beatmaps").fetchall()
+	frame = pl.DataFrame(
+		rows,
+		schema={"beatmap_id": pl.Int64, "beatmapset_id": pl.Int64, "keys": pl.Int64},
+		orient="row",
+	)
+
+	invalid = frame.filter(pl.col("beatmapset_id").is_null() | (pl.col("beatmapset_id") <= 0))
+	if invalid.height:
+		raise ValueError(f"{invalid.height} beatmaps have no positive beatmapset_id")
+
+	return frame

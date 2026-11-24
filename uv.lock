@@ -3292,14 +3292,14 @@ wheels = [
 
 [[package]]
 name = "urc-converter"
-version = "0.2.1"
+version = "0.3.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/34/09/bd45f559586fa02c7e0010a9a525fd601734f2a59f5f6053d31f2c24a3f7/urc_converter-0.2.1.tar.gz", hash = "sha256:a78ab898512ed3f493d47f5b9f7a01b006e1d9a70eec16a17bf1a530a046ef04", size = 33969, upload-time = "2026-11-24T02:52:27.401Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/84/8c/c84882a1a8018ae10e09c5dff8baaac59923397c81cf59e8f444ba52949d/urc_converter-0.3.0.tar.gz", hash = "sha256:1dbb7bc533c6db381773184c52975530847fc5e4edb89f91b3519934ad89a8b8", size = 36816, upload-time = "2026-11-24T07:07:54.523Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7b/e7/f543797136596b75630cffff13aa8b38408bb331d3f6b6d92e5f3c85ef86/urc_converter-0.2.1-py3-none-any.whl", hash = "sha256:296cf0bfbdac0a4d0fc75291f4c2d197547d75443079618447d47d4b4dd694f4", size = 42206, upload-time = "2026-11-24T02:52:26.433Z" },
+    { url = "https://files.pythonhosted.org/packages/cb/ea/6c887f488a97b0e1b0a9a0adbc37d802f29df38e88f7698a611c90a2766f/urc_converter-0.3.0-py3-none-any.whl", hash = "sha256:df8d5798abd94bb1d2c339cd1b1cb414db571debf080693e1030d7bdc5761f4e", size = 45688, upload-time = "2026-11-24T07:07:53.699Z" },
 ]
 
 [[package]]
@@ -3358,7 +3358,7 @@ research = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "urc-converter", specifier = ">=0.2.1" }]
+requires-dist = [{ name = "urc-converter", specifier = ">=0.3.0" }]
 
 [package.metadata.requires-dev]
 dev = [
