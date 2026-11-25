@@ -7,10 +7,13 @@ import numpy as np
 import torch
 from torch import Tensor
 
-BOUNDARY_NODES = 21
+BOUNDARY_NODES = 48
+
+_SPAN = 10.0
+_BEND = 6.0
 
 _HALF_LOG_2PI = 0.5 * math.log(2.0 * math.pi)
-_NODES, _WEIGHTS = np.polynomial.hermite.hermgauss(BOUNDARY_NODES)
+_NODES, _WEIGHTS = np.polynomial.legendre.leggauss(BOUNDARY_NODES)
 
 
 def expected_log_k(
@@ -23,18 +26,16 @@ def expected_log_k(
 	mu: Tensor,
 	cov: Tensor,
 ) -> Tensor:
-	"""E_q[log k] per cell: closed form inside (0, 1), Gauss-Hermite over eta at the endpoints."""
+	"""E_q[log k] per cell: closed form inside (0, 1), piecewise Gauss-Legendre over eta at the
+	endpoints."""
 	interior, one, m, v = _prepare(x, g, log_dg, alpha, beta, sigma, mu, cov)
 	g, log_dg = _interior_only(interior, g, log_dg)
 	inside = -_HALF_LOG_2PI - torch.log(sigma) + log_dg - ((g - m) ** 2 + v) / (2.0 * sigma**2)
 
-	nodes = torch.as_tensor(_NODES, dtype=x.dtype, device=x.device)
-	weights = torch.as_tensor(_WEIGHTS / math.sqrt(math.pi), dtype=x.dtype, device=x.device)
-	eta = m[:, None] + math.sqrt(2.0) * _sqrt(v)[:, None] * nodes
-	z = _endpoint_z(one[:, None], eta, sigma[:, None])
-	edge = (torch.special.log_ndtr(z) * weights).sum(dim=1)
+	edge = ~interior
+	means = _endpoint_mean(one[edge], m[edge], v[edge], sigma[edge])
 
-	return torch.where(interior, inside, edge)
+	return torch.where(interior, inside, torch.zeros_like(m).masked_scatter(edge, means))
 
 
 def log_expected_k(
@@ -119,11 +120,28 @@ def _interior_only(interior: Tensor, g: Tensor, log_dg: Tensor) -> tuple[Tensor,
 	return torch.where(interior, g, zero), torch.where(interior, log_dg, zero)
 
 
-def _sqrt(v: Tensor) -> Tensor:
-	# sqrt has an infinite slope at 0; v = 0 happens for a zero psoterior or alpha.
+def _endpoint_mean(one: Tensor, m: Tensor, v: Tensor, sigma: Tensor) -> Tensor:
+	"""E[log Phi(z)] over eta ~ N(m, v) at endpoint cells; log Phi(z(m)) where v = 0."""
 	positive = v > 0.0
-	root = torch.sqrt(torch.where(positive, v, torch.ones_like(v)))
-	return torch.where(positive, root, torch.zeros_like(v))
+	sd = torch.sqrt(torch.where(positive, v, torch.ones_like(v)))
+	threshold = one.to(m.dtype)
+	lo, hi = m - _SPAN * sd, m + _SPAN * sd
+
+	below = torch.clamp(threshold - _BEND * sigma, lo, hi)
+	above = torch.clamp(threshold + _BEND * sigma, lo, hi)
+	cuts = torch.stack([lo, below, above, hi], dim=1)
+
+	nodes = torch.as_tensor(_NODES, dtype=m.dtype, device=m.device)
+	weights = torch.as_tensor(_WEIGHTS, dtype=m.dtype, device=m.device)
+
+	half = (cuts[:, 1:] - cuts[:, :-1])[..., None] / 2.0
+	eta = (cuts[:, 1:] + cuts[:, :-1])[..., None] / 2.0 + half * nodes
+	u = (eta - m[:, None, None]) / sd[:, None, None]
+	density = torch.exp(-0.5 * u**2 - _HALF_LOG_2PI) / sd[:, None, None]
+	z = _endpoint_z(one[:, None, None], eta, sigma[:, None, None])
+	pieces = (half * weights * density * torch.special.log_ndtr(z)).sum(dim=(1, 2))
+
+	return torch.where(positive, pieces, torch.special.log_ndtr(_endpoint_z(one, m, sigma)))
 
 
 def _endpoint_z(one: Tensor, eta: Tensor, scale: Tensor) -> Tensor:
