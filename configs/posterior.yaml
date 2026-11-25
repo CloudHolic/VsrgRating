@@ -1,0 +1,17 @@
+defaults:
+  - dataset: keys4to8
+  - model: cnrm
+  - transform: pspline
+  - estimator: map
+  - tracking: local
+  - _self_
+
+name: ???
+dataset_root: data/datasets
+split_root: data/splits
+runs_root: runs
+posterior:
+  min_item_responses: 50
+  min_person_responses: 2
+  drop_keys: []
+  init_seeds: [20261111, 20261125]

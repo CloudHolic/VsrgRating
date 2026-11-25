@@ -20,14 +20,16 @@ _NEWTON_STEPS = 8
 _NEWTON_CLIP = 0.5
 # With D >= 2 the extra axes start off zero: all-zero is a saddle where their gradient vanishes.
 _ALPHA_JITTER = 0.1
-_INIT_SEED = 20261111
+INIT_SEED = 20261111
 # Modes sought from 0 rather than from a previous step need more than 1 Newton round.
 _SUMMARY_ROUNDS = 5
+_SUMMARY_CHUNK = 4096
 
 
 @dataclass(frozen=True)
 class MAPConfig:
-	"""Quadrature, optimizer (Adam with cosine decay) and node re-centring schedule."""
+	"""Quadrature, optimizer (Adam with cosine decay), node re-centring schedule, and the seed of
+	the start's extra alpha axes."""
 
 	n_nodes: int
 	steps: int
@@ -35,6 +37,7 @@ class MAPConfig:
 	final_lr_fraction: float
 	scan_every: int
 	prior_scale: float
+	init_seed: int = INIT_SEED
 
 
 class Cells(NamedTuple):
@@ -169,7 +172,12 @@ def zoi_params(
 
 
 def cnrm_params(
-	alpha: np.ndarray, beta: np.ndarray, sigma: np.ndarray, spec: TransformSpec, dims: int = 1
+	alpha: np.ndarray,
+	beta: np.ndarray,
+	sigma: np.ndarray,
+	spec: TransformSpec,
+	dims: int = 1,
+	seed: int = INIT_SEED,
 ) -> dict[str, Array]:
 	"""The optimizer's coordinates: (log alpha, beta, log sigma) as in the paper, plus G's."""
 	result = {
@@ -181,7 +189,7 @@ def cnrm_params(
 	if dims == 1:
 		result["log_alpha"] = jnp.asarray(np.log(np.maximum(np.asarray(alpha), 1e-3)))
 	else:
-		start = np.random.default_rng(_INIT_SEED).normal(0.0, _ALPHA_JITTER, (len(alpha), dims))
+		start = np.random.default_rng(seed).normal(0.0, _ALPHA_JITTER, (len(alpha), dims))
 		start[:, 0] = np.maximum(np.asarray(alpha), 1e-3)
 		result["alpha"] = jnp.asarray(start)
 
@@ -236,7 +244,7 @@ def fit_map(
 		params, m1, m2 = _adam(params, grads, m1, m2, step + 1, lr)
 
 	params = best[1]
-	log_marginal, eap, psd = person_summary(
+	log_marginal, eap, cov = person_summary(
 		model, params, person, item, x, n_persons, config.n_nodes, mode
 	)
 
@@ -247,7 +255,7 @@ def fit_map(
 		best_step=int(best[2]),
 		log_marginal=float(log_marginal.sum()),
 		eap=np.asarray(eap),
-		psd=np.asarray(psd),
+		psd=np.asarray(posterior_sd(cov)),
 	)
 
 
@@ -261,7 +269,7 @@ def person_summary(
 	n_nodes: int,
 	start: Array | None = None,
 ) -> tuple[Array, Array, Array]:
-	"""Each person's log marginal likelihood, posterior mean and sd at `params`, by adaptive
+	"""Each person's log marginal likelihood, posterior mean and covariance at `params`, by adaptive
 	Gauss-Hermite around the posterior mode. Without `start` the modes are sought from zero."""
 	cells = _cells(person, item, x)
 	x_h, log_w_h = hermite(n_nodes, model.dims)
@@ -276,14 +284,23 @@ def person_summary(
 		mode, scale = _modes(model, params, cells, n_persons, mode, model.dims == 1)
 
 	nodes, log_w = adaptive_nodes(mode, scale, x_h, log_w_h)
-	joint = _joint(model, params, cells, n_persons, nodes, log_w)
+	joint = _chunked_joint(model, params, person, item, x, n_persons, nodes) + log_w
 	log_marginal = logsumexp(joint, axis=1)
 	post = jnp.exp(joint - log_marginal[:, None])
-	weight = post if nodes.ndim == 2 else post[..., None]
-	eap = (weight * nodes).sum(axis=1)
-	psd = jnp.sqrt((weight * (nodes - eap[:, None]) ** 2).sum(axis=1))
 
-	return log_marginal, eap, psd
+	if nodes.ndim == 2:
+		mean = (post * nodes).sum(axis=1)
+		return log_marginal, mean, (post * (nodes - mean[:, None]) ** 2).sum(axis=1)
+
+	mean = jnp.einsum("ph,phi->pi", post, nodes)
+	diff = nodes - mean[:, None, :]
+
+	return log_marginal, mean, jnp.einsum("ph,phi,phj->pij", post, diff, diff)
+
+
+def posterior_sd(cov: Array) -> Array:
+	"""Per-axis posterior sd from person_summary's covariance."""
+	return jnp.sqrt(cov if cov.ndim == 1 else jnp.diagonal(cov, axis1=1, axis2=2))
 
 
 def _cells(person: np.ndarray, item: np.ndarray, x: np.ndarray) -> Cells:
@@ -326,6 +343,40 @@ def _joint(
 	"""log L_p(theta_ph) + log w_ph, shape (persons, nodes)."""
 	lk = model.cell_log_k(params, cells, nodes[cells.person])
 	return jax.ops.segment_sum(lk, cells.person, num_segments=n_persons) + log_w
+
+
+def _chunked_joint(
+	model: Model,
+	params: dict[str, Array],
+	person: np.ndarray,
+	item: np.ndarray,
+	x: np.ndarray,
+	n_persons: int,
+	nodes: Array,
+) -> Array:
+	"""log L_p at every node, shape (persons, nodes), summed over fixed-size chunks of cells."""
+	# The (cells, nodes) array of 11^3 nodes does not fit; padded cells goto a sentinel person.
+	pad = (-x.size) % _SUMMARY_CHUNK
+	person = np.concatenate([person, np.full(pad, n_persons)])
+	item = np.concatenate([item, np.zeros(pad, dtype=item.dtype)])
+	x = np.concatenate([x, np.full(pad, 0.5)])
+	padded = jnp.concatenate([nodes, jnp.zeros((1, *nodes.shape[1:]))])
+
+	total = jnp.zeros((n_persons + 1, nodes.shape[1]))
+	for start in range(0, x.size, _SUMMARY_CHUNK):
+		sl = slice(start, start + _SUMMARY_CHUNK)
+		cells = _cells(person[sl], item[sl], x[sl])
+		total = total + _joint_chunk(model, params, cells, padded, n_persons)
+
+	return total[:n_persons]
+
+
+@partial(jax.jit, static_argnames=("model", "n_persons"))
+def _joint_chunk(
+	model: Model, params: dict[str, Array], cells: Cells, nodes: Array, n_persons: int
+) -> Array:
+	lk = model.cell_log_k(params, cells, nodes[cells.person])
+	return jax.ops.segment_sum(lk, cells.person, num_segments=n_persons + 1)
 
 
 @partial(jax.jit, static_argnames=("model", "n_persons", "prior_scale"))

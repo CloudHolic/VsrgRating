@@ -12,7 +12,7 @@ from jax.scipy.stats import norm
 
 from ..data import Split
 from ..irt.cnrm import model as cnrm
-from ..irt.map import Cells, Model, person_summary
+from ..irt.map import Cells, Model, person_summary, posterior_sd
 from ..irt.zoi_beta import model as zoi_beta
 from .fitted import Fitted
 
@@ -118,11 +118,11 @@ def _posterior_nodes(fitted: Fitted, data: Split) -> Posterior:
 		"transform": fitted.raw,
 	}
 	nodes = HELDOUT_NODES[fitted.model.dims]
-	log_marginal, mean, sd = person_summary(
+	log_marginal, mean, cov = person_summary(
 		fitted.model, params, data.person, data.item, data.x, data.n_persons, nodes
 	)
 
-	return Posterior(np.asarray(log_marginal), np.asarray(mean), np.asarray(sd))
+	return Posterior(np.asarray(log_marginal), np.asarray(mean), np.asarray(posterior_sd(cov)))
 
 
 @partial(jax.jit, static_argnames=("model", "n_persons"))

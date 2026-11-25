@@ -3,6 +3,7 @@ refits that are kept as runs and read back when they already exist."""
 
 import json
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +17,16 @@ from .data import Split
 from .evaluation import Fitted, load_run, locate_run
 from .irt.cnrm.em import init_person_mean_ols
 from .irt.cnrm.transform import TransformSpec
-from .irt.map import MAPConfig, MAPResult, Model, cnrm_params, fit_map, zoi_moment_init, zoi_tau
+from .irt.map import (
+	INIT_SEED,
+	MAPConfig,
+	MAPResult,
+	Model,
+	cnrm_params,
+	fit_map,
+	zoi_moment_init,
+	zoi_tau,
+)
 from .irt.zoi_beta.model import COORDS
 from .tracking import METRICS, run_output, write_metrics
 
@@ -58,6 +68,7 @@ def map_settings(cfg: DictConfig) -> MAPConfig:
 		final_lr_fraction=e.final_lr_fraction,
 		scan_every=e.scan_every,
 		prior_scale=cfg.model.prior_scale,
+		init_seed=e.get("init_seed", INIT_SEED),
 	)
 
 
@@ -85,7 +96,7 @@ def fit_map_split(model: Model, config: MAPConfig, data: Split) -> MAPResult:
 	if model.family == "cnrm":
 		assert model.transform is not None
 		ols = init_person_mean_ols(data.person, data.item, data.x, data.n_persons, data.n_items)
-		init = cnrm_params(*ols, model.transform, model.dims)
+		init = cnrm_params(*ols, model.transform, model.dims, config.init_seed)
 	else:
 		init = zoi_moment_init(data.item, data.x, data.n_items)
 
@@ -104,7 +115,7 @@ def write_map(out: Path, model: Model, data: Split, result: MAPResult) -> dict[s
 			"beta": p["beta"],
 			"sigma": np.exp(p["log_sigma"]),
 		}
-		_write_transform(out, model.transform, p["transform"])
+		write_transform(out, model.transform, p["transform"])
 	else:
 		tau = zoi_tau({name: jnp.asarray(value) for name, value in p.items()})
 		items = {c: np.asarray(v) for c, v in zip(COORDS, tau, strict=True)}
@@ -131,6 +142,21 @@ def write_persons(out: Path, data: Split, eap: np.ndarray, psd: np.ndarray) -> N
 	pl.DataFrame(columns).write_parquet(out / "persons.parquet")
 
 
+def write_transform(out: Path, spec: TransformSpec, raw: np.ndarray) -> None:
+	"""transform.json: G's kind, knots, penalty, raw parameters and its exponent at the knots."""
+	knots = np.asarray(spec.knots)
+	record = {
+		"kind": spec.kind,
+		"knots": knots.tolist(),
+		"penalty": spec.penalty,
+		"raw": np.atleast_1d(raw).tolist(),
+		"exponent_at_knots": np.asarray(
+			spec.exponent(jnp.asarray(raw), jnp.asarray(knots))
+		).tolist(),
+	}
+	(out / "transform.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
+
+
 def check_same(cfg: DictConfig, path: Path) -> None:
 	"""2 fits compare only under 1 model and 1 estimator."""
 	other = OmegaConf.load(path / "config.yaml")
@@ -141,7 +167,13 @@ def check_same(cfg: DictConfig, path: Path) -> None:
 			raise ValueError(f"{path} differs from this run in {key}")
 
 
-def refit(refits: Refits, response: str, label: str, data: Split) -> Fitted:
+def refit(
+	refits: Refits,
+	response: str,
+	label: str,
+	data: Split,
+	extra_tags: Mapping[str, str] | None = None,
+) -> Fitted:
 	"""The finished refit `response-label` if there is one, else a new fit kept as its own run."""
 	cfg = refits.cfg
 	part = f"{response}-{label}"
@@ -161,26 +193,12 @@ def refit(refits: Refits, response: str, label: str, data: Split) -> Fitted:
 		runtime = time.perf_counter() - start
 
 		metrics = {"runtime_s": runtime, **write_map(out, refits.model, data, result)}
-		tags = {**run_tags(cfg, refits.model, data, response), "refit": label}
+		tags = {**run_tags(cfg, refits.model, data, response), "refit": label, **(extra_tags or {})}
 		write_metrics(out, tags, metrics, {})
 
 	print(f"{part}: fitted in {runtime:.0f}s", flush=True)
 
 	return load_run(part, path)
-
-
-def _write_transform(out: Path, spec: TransformSpec, raw: np.ndarray) -> None:
-	knots = np.asarray(spec.knots)
-	record = {
-		"kind": spec.kind,
-		"knots": knots.tolist(),
-		"penalty": spec.penalty,
-		"raw": np.atleast_1d(raw).tolist(),
-		"exponent_at_knots": np.asarray(
-			spec.exponent(jnp.asarray(raw), jnp.asarray(knots))
-		).tolist(),
-	}
-	(out / "transform.json").write_text(json.dumps(record, indent=2), encoding="utf-8")
 
 
 def _columns(name: str, value: np.ndarray) -> dict[str, np.ndarray]:

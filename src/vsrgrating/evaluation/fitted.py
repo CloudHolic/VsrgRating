@@ -34,6 +34,11 @@ def load_run(name: str, path: Path, chains: tuple[int, ...] | None = None) -> Fi
 
 	if family == "cnrm":
 		items = pl.read_parquet(path / "items.parquet").sort("item_idx")
+		if items["item_idx"].to_list() != list(range(items.height)):
+			raise ValueError(
+				f"{path}: items.parquet does not hold every item 0..{items.height - 1}"
+			)
+
 		dims = sum(c.startswith("alpha_") for c in items.columns) or 1
 		names = ["alpha"] if dims == 1 else [f"alpha_{k}" for k in range(1, dims + 1)]
 		alpha = items.select(names).to_numpy()

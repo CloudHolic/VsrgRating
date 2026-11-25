@@ -1,0 +1,8 @@
+# @package _global_
+name: keys4to8_posterior_d3
+model:
+  dims: 3
+estimator:
+  n_nodes: 5
+  learning_rate: 0.005
+  final_lr_fraction: 0.02

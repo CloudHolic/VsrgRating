@@ -3,6 +3,7 @@
 from .build import build
 from .config import DatasetConfig
 from .load import Split, load_split, locate_dataset, split_persons, subset
+from .posterior import PosteriorCells, posterior_cells
 from .query import connect, fetch_mania_beatmaps
 from .splits import TEST_PINNED_MAPSETS, build_mapset_split, is_test_mapset, split_mapsets
 from .tables import RESPONSES
@@ -11,6 +12,7 @@ __all__ = [
 	"RESPONSES",
 	"TEST_PINNED_MAPSETS",
 	"DatasetConfig",
+	"PosteriorCells",
 	"Split",
 	"build",
 	"build_mapset_split",
@@ -19,6 +21,7 @@ __all__ = [
 	"is_test_mapset",
 	"load_split",
 	"locate_dataset",
+	"posterior_cells",
 	"split_mapsets",
 	"split_persons",
 	"subset",
