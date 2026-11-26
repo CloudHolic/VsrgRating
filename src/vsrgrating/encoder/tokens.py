@@ -1,5 +1,5 @@
 """A chart as tokens: 1 token per integer millisecond holding any chart event, with each lane's
-state there and the timing grid under it."""
+state there and the scroll speed around it."""
 
 from collections import Counter
 from dataclasses import dataclass, replace
@@ -7,11 +7,6 @@ from enum import IntEnum
 
 import numpy as np
 from urc_converter import Chart, Layout, Note, NoteType
-
-# Beat subdivisions, coarsest first; a token takes the first one within SNAP_TOLERANCE_MS.
-SNAP_DENOMS = (1, 2, 3, 4, 6, 8, 12, 16)
-SNAP_OTHER = len(SNAP_DENOMS)
-SNAP_TOLERANCE_MS = 2.0
 
 _EVENTS = (NoteType.N, NoteType.LS, NoteType.LE, NoteType.M)
 
@@ -44,14 +39,11 @@ class ChartTokens:
 	times: np.ndarray
 	state: np.ndarray
 	holds: np.ndarray
-	bpm: np.ndarray
-	sv: np.ndarray
+	speed: np.ndarray
 	scroll: np.ndarray
-	sv_min: np.ndarray
-	sv_max: np.ndarray
-	sv_changes: np.ndarray
-	phase: np.ndarray
-	snap: np.ndarray
+	speed_min: np.ndarray
+	speed_max: np.ndarray
+	speed_changes: np.ndarray
 	lanes: int
 	special_lanes: tuple[int, ...]
 	judgment: np.ndarray | None
@@ -62,6 +54,8 @@ def tokenize(chart: Chart) -> ChartTokens:
 	"""The chart's tokens."""
 	if not chart.timing:
 		raise ValueError("the chart has no timing points")
+	if chart.timing[0].bpm <= 0:
+		raise ValueError(f"the first BPM must be positive, got {chart.timing[0].bpm}")
 
 	notes = [note for note in chart.notes if note.type in _EVENTS]
 	if not notes:
@@ -71,8 +65,7 @@ def tokenize(chart: Chart) -> ChartTokens:
 	times = np.unique(np.array([note.timestamp_ms for note in notes], dtype=np.int64))
 	holds = _holds(notes)
 	state, collisions = _states(notes, times, holds, lanes)
-	bpm, sv, phase, snap = _grid(chart, times)
-	scroll, sv_min, sv_max, sv_changes = _scroll(chart, times)
+	speed, scroll, speed_min, speed_max, speed_changes = _speed(chart, times)
 
 	judgment = None
 	if chart.judgment is not None:
@@ -82,14 +75,11 @@ def tokenize(chart: Chart) -> ChartTokens:
 		times=times,
 		state=state,
 		holds=holds,
-		bpm=bpm,
-		sv=sv,
+		speed=speed,
 		scroll=scroll,
-		sv_min=sv_min,
-		sv_max=sv_max,
-		sv_changes=sv_changes,
-		phase=phase,
-		snap=snap,
+		speed_min=speed_min,
+		speed_max=speed_max,
+		speed_changes=speed_changes,
 		lanes=lanes,
 		special_lanes=tuple(chart.layout.special_lanes or ()),
 		judgment=judgment,
@@ -174,48 +164,14 @@ def _states(
 	return state, sum(1 for n in per_cell.values() if n > 1)
 
 
-def _grid(chart: Chart, times: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-	"""BPM, scroll multiplier, beat phase and snap of the timing point active at each token."""
+def _speed(
+	chart: Chart, times: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+	"""Scroll speed and position at each token, and the speed's range and change count since the
+	previous token."""
 	points = chart.timing
 	starts = np.array([point.timestamp_ms for point in points], dtype=np.int64)
-	anchors = np.empty(len(points), dtype=np.int64)
-	previous: tuple[float, int, int, float] | None = None
-	anchor = starts[0]
-
-	for i, point in enumerate(points):
-		current = (point.bpm, point.meter.beats, point.meter.note_value, _sv(point.multiplier))
-		# An SV-only entry keeps the grid.
-		if previous is None or current[:3] != previous[:3] or current == previous:
-			anchor = point.timestamp_ms
-		anchors[i] = anchor
-		previous = current
-
-	active = np.clip(np.searchsorted(starts, times, "right") - 1, 0, len(points) - 1)
-	bpm = np.array([points[i].bpm for i in active], dtype=float)
-	sv = np.array([_sv(points[i].multiplier) for i in active], dtype=float)
-	beats = (times - anchors[active]) * bpm / 60000.0
-	phase = np.mod(beats, 1.0)
-
-	beat_ms = 60000.0 / bpm
-	snap = np.full(times.size, SNAP_OTHER, dtype=np.int8)
-
-	for index in reversed(range(len(SNAP_DENOMS))):
-		d = SNAP_DENOMS[index]
-		error_ms = np.abs(phase * d - np.round(phase * d)) / d * beat_ms
-		snap[error_ms <= SNAP_TOLERANCE_MS] = index
-
-	return bpm, sv, phase, snap
-
-
-def _scroll(
-	chart: Chart, times: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-	"""Scroll position at each token, and the multiplier's range and change count since the
-	previous token."""
-	starts = np.array([point.timestamp_ms for point in chart.timing], dtype=np.int64)
-	values = np.array([_sv(point.multiplier) for point in chart.timing], dtype=float)
-	last = np.append(starts[1:] != starts[:-1], True)
-	starts, values = starts[last], values[last]
+	values = np.array([_sv(point.multiplier) * point.bpm for point in points]) / points[0].bpm
 
 	reached = np.concatenate([[0.0], np.cumsum(values[:-1] * np.diff(starts))])
 	active = np.clip(np.searchsorted(starts, times, "right") - 1, 0, values.size - 1)
@@ -223,12 +179,13 @@ def _scroll(
 	changed = np.concatenate([[0], np.cumsum(values[1:] != values[:-1])])
 
 	before = np.concatenate([active[:1], active[:-1]])
-	sv_min, sv_max = values[active].copy(), values[active].copy()
+	low, high = values[active].copy(), values[active].copy()
+
 	for i in np.flatnonzero(active > before):
 		span = values[before[i] : active[i] + 1]
-		sv_min[i], sv_max[i] = span.min(), span.max()
+		low[i], high[i] = span.min(), span.max()
 
-	return position - position[0], sv_min, sv_max, changed[active] - changed[before]
+	return values[active], position - position[0], low, high, changed[active] - changed[before]
 
 
 def _lane_events(chart: Chart, lane: int) -> list[Note]:
