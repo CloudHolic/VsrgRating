@@ -71,7 +71,7 @@ class Part:
 
 def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> None:
 	overrides = overrides or []
-	cfg = compose_config("fine_tune", overrides)
+	cfg = compose_config("train_chart_model", overrides)
 	label = run_label(cfg)
 	check_new(cfg, label)
 
