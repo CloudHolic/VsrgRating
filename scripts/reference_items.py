@@ -47,7 +47,7 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 	items = target_items(posterior, cfg.part)
 	cells = cell_tensors(posterior, items["item_idx"].to_numpy(), device)
 	prior = key_mode_psi(posterior)
-	floor = floor_params(items, prior)
+	floor, fallback = floor_params(items, prior)
 	tags = {
 		**posterior.tags,
 		"kind": str(cfg.kind),
@@ -69,6 +69,7 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 		write_item_params(out / f"items_{cfg.part}.parquet", items.select("item_idx"), out_items)
 		metrics |= {
 			"items": float(items.height),
+			"fallback_items": float(fallback),
 			"total_log_expected_k": float(loglik.sum()),
 			"sigma_min": float(out_items.sigma.min()),
 			"runtime_s": time.perf_counter() - start,
@@ -100,13 +101,24 @@ def key_mode_psi(posterior: Posterior) -> pl.DataFrame:
 	return posterior.psi_t.join(keys, on="item_idx").with_columns(log_sigma=pl.col("sigma").log())
 
 
-def floor_params(items: pl.DataFrame, prior: pl.DataFrame) -> np.ndarray:
-	"""(I, 5) float64: each item's key-mode median of every component."""
-	medians = prior.group_by("keys").agg(pl.col(c).median() for c in COMPONENTS)
-	table = items.join(medians, on="keys", how="left")
-	if table.select(pl.col(c).null_count() for c in COMPONENTS).to_numpy().any():
-		raise ValueError("a target key mode has no T items")
-	return table.select(COMPONENTS).to_numpy().astype(np.float64)
+def per_item(
+	items: pl.DataFrame, prior: pl.DataFrame, exprs: list[pl.Expr]
+) -> tuple[pl.DataFrame, int]:
+	"""`exprs` over the T items of each target item's key mode, in item order, or over all T
+	items where that key mode has none; and how many items took the latter."""
+	by_key = prior.group_by("keys").agg(exprs)
+	overall = prior.select(exprs)
+	table = items.join(by_key, on="keys", how="left", maintain_order="left")
+	fallback = int(table[overall.columns[0]].null_count())
+
+	return table.with_columns(pl.col(c).fill_null(overall[c][0]) for c in overall.columns), fallback
+
+
+def floor_params(items: pl.DataFrame, prior: pl.DataFrame) -> tuple[np.ndarray, int]:
+	"""(I, 5) float64: each item's key-mode median of every component; and how many items took
+	every T item's median instead."""
+	table, fallback = per_item(items, prior, [pl.col(c).median() for c in COMPONENTS])
+	return table.select(COMPONENTS).to_numpy().astype(np.float64), fallback
 
 
 def fit_ceiling(
@@ -118,13 +130,16 @@ def fit_ceiling(
 	cov: torch.Tensor,
 ) -> tuple[torch.Tensor, dict[str, float]]:
 	"""Each item's MAP under its own cells' log E_q[k] and an independent normal prior per
-	component (that key mode's T mean and variance). Items share no parameter, so one L-BFGS
-	over all of them reaches every item's own optimum."""
-	moments = prior.group_by("keys").agg(
-		*(pl.col(c).mean().alias(f"{c}_mean") for c in COMPONENTS),
-		*(pl.col(c).var().alias(f"{c}_var") for c in COMPONENTS),
+	component (that key mode's T mean and variance, as the floor falls back). Items share
+	no parameter, so one L-BFGS over all of them reaches every item's own optimum."""
+	table, _ = per_item(
+		items,
+		prior,
+		[
+			*(pl.col(c).mean().alias(f"{c}_mean") for c in COMPONENTS),
+			*(pl.col(c).var().alias(f"{c}_var") for c in COMPONENTS),
+		],
 	)
-	table = items.join(moments, on="keys", how="left")
 	device = start.device
 	mean = torch.as_tensor(table.select(f"{c}_mean" for c in COMPONENTS).to_numpy(), device=device)
 	var = torch.as_tensor(table.select(f"{c}_var" for c in COMPONENTS).to_numpy(), device=device)
