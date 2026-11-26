@@ -1,68 +1,20 @@
-"""One layout's model input: the tokens of a chart with lane, finger, finger-pair and two-hand
-features computed for that hand and finger assignment."""
+"""What a chart asks of the body under one hand and finger assignment."""
 
 from dataclasses import dataclass
-from enum import IntEnum
 
 import numpy as np
 
 from .layouts import Finger, Hand, LaneMap, pairs
+from .schema import FINGER_FEATURES, LANE_FEATURES, PAIR_FEATURES, Flag, Known
 from .tokens import ChartTokens, LaneState
-
-TOKEN_FEATURES = (
-	"log_dt",
-	"position",
-	"speed_sign",
-	"speed_log",
-	"scroll_dx",
-	"speed_min_sign",
-	"speed_min_log",
-	"speed_max_sign",
-	"speed_max_log",
-	"speed_changes",
-)
-LANE_FEATURES = ("lane_dt", "hold_length", "hold_elapsed")
-FINGER_FEATURES = ("finger_dt", "bound", "hits_while_bound")
-PAIR_FEATURES = ("last_gap", "last_order", "other_bound")
-META_FEATURES = (
-	"lanes",
-	"special_lanes",
-	"duration",
-	"hand_lanes_min",
-	"hand_lanes_max",
-	"both_lanes",
-	"uses_thumb",
-	"uses_pinky",
-)
-# |speed| and judgment windows are clamped here before the log.
-LOG_FLOOR, LOG_CEIL = 1e-3, 1e3
 
 _HITS = (LaneState.TAP, LaneState.HOLD_START)
 
 
-class Known(IntEnum):
-	"""Whether a derived value is there: NONE when it is undefined (no earlier hit)."""
-
-	KNOWN = 0
-	NONE = 1
-	MASKED = 2
-
-
-class Flag(IntEnum):
-	"""A yes-or-no feature that pretraining can mask."""
-
-	NO = 0
-	YES = 1
-	MASKED = 2
-
-
 @dataclass(frozen=True)
-class LayoutInput:
-	"""T tokens, L lanes, P finger pairs; `judgment` is (J, 2): log window ms and score rate."""
+class Body:
+	"""The LayoutInput arrays this module computes, under the same names."""
 
-	state: np.ndarray
-	token: np.ndarray
-	token_dt_known: np.ndarray
 	lane: np.ndarray
 	lane_known: np.ndarray
 	finger: np.ndarray
@@ -71,19 +23,10 @@ class LayoutInput:
 	pair_known: np.ndarray
 	pair_index: np.ndarray
 	hands: np.ndarray
-	lane_hand: np.ndarray
-	lane_finger: np.ndarray
-	lane_position: np.ndarray
-	meta: np.ndarray
-	judgment: np.ndarray | None
 
 
-def layout_input(tokens: ChartTokens, lane_map: LaneMap) -> LayoutInput:
-	"""The model input of `tokens` under one hand and finger assignment."""
-	lanes = tokens.state.shape[1]
-	if len(lane_map.hand) != lanes:
-		raise ValueError(f"the layout has {len(lane_map.hand)} lanes, the chart {lanes}")
-
+def body(tokens: ChartTokens, lane_map: LaneMap) -> Body:
+	"""The lane, finger, pair and two-hand features of `tokens` under `lane_map`."""
 	times = tokens.times.astype(float)
 	hit = np.isin(tokens.state, _HITS)
 	holding = tokens.state == LaneState.HOLDING
@@ -98,13 +41,7 @@ def layout_input(tokens: ChartTokens, lane_map: LaneMap) -> LayoutInput:
 	index = pairs(lane_map)
 	pair, pair_known = _pair_features(holding, members, finger_hit, finger_last_or_now, index)
 
-	token_dt_known = np.full(times.size, Known.KNOWN, dtype=np.int8)
-	token_dt_known[0] = Known.NONE
-
-	return LayoutInput(
-		state=tokens.state,
-		token=_token_features(tokens, times),
-		token_dt_known=token_dt_known,
+	return Body(
 		lane=lane,
 		lane_known=lane_known,
 		finger=finger,
@@ -113,32 +50,7 @@ def layout_input(tokens: ChartTokens, lane_map: LaneMap) -> LayoutInput:
 		pair_known=pair_known,
 		pair_index=index,
 		hands=_hands(hit, lane_map),
-		lane_hand=np.array(lane_map.hand, dtype=np.int8),
-		lane_finger=np.array(lane_map.finger, dtype=np.int8),
-		lane_position=_lane_position(lanes, tokens.special_lanes),
-		meta=_meta(tokens, times, lane_map),
-		judgment=_judgment(tokens.judgment),
 	)
-
-
-def _token_features(tokens: ChartTokens, times: np.ndarray) -> np.ndarray:
-	span = times[-1] - times[0]
-	dt = np.diff(times, prepend=times[0])
-	dx = np.diff(tokens.scroll, prepend=tokens.scroll[0])
-	columns = [
-		np.log1p(dt),
-		(times - times[0]) / span if span > 0 else np.zeros_like(times),
-		np.sign(tokens.speed),
-		_log(np.abs(tokens.speed)),
-		np.sign(dx) * np.log1p(np.abs(dx)),
-		np.sign(tokens.speed_min),
-		_log(np.abs(tokens.speed_min)),
-		np.sign(tokens.speed_max),
-		_log(np.abs(tokens.speed_max)),
-		np.log1p(tokens.speed_changes),
-	]
-
-	return np.stack(columns, axis=1).astype(np.float32)
 
 
 def _lane_features(
@@ -263,41 +175,6 @@ def _hands(hit: np.ndarray, lane_map: LaneMap) -> np.ndarray:
 	return flags
 
 
-def _lane_position(lanes: int, special: tuple[int, ...]) -> np.ndarray:
-	position = np.zeros((lanes, 3), dtype=np.float32)
-	if lanes > 1:
-		position[:, 0] = 2 * np.arange(lanes) / (lanes - 1) - 1
-	if lanes % 2:
-		position[lanes // 2, 1] = 1
-	position[list(special), 2] = 1
-
-	return position
-
-
-def _meta(tokens: ChartTokens, times: np.ndarray, lane_map: LaneMap) -> np.ndarray:
-	hand = lane_map.hand
-	own = (hand.count(Hand.LEFT), hand.count(Hand.RIGHT))
-	values = [
-		tokens.lanes,
-		len(tokens.special_lanes),
-		np.log1p((times[-1] - times[0]) / 1000),
-		min(own),
-		max(own),
-		hand.count(Hand.BOTH),
-		Finger.THUMB in lane_map.finger,
-		Finger.PINKY in lane_map.finger,
-	]
-
-	return np.array(values, dtype=np.float32)
-
-
-def _judgment(judgment: np.ndarray | None) -> np.ndarray | None:
-	if judgment is None:
-		return None
-
-	return np.column_stack([_log(judgment[:, 0]), judgment[:, 1]]).astype(np.float32)
-
-
 def _fingers(lane_map: LaneMap) -> dict[tuple[Hand, Finger], list[int]]:
 	"""Each finger (its hand, or BOTH for a shared lane) and the lanes it plays."""
 	members: dict[tuple[Hand, Finger], list[int]] = {}
@@ -336,7 +213,3 @@ def _bound_since(hit: np.ndarray, own: list[int]) -> np.ndarray:
 	"""For each token, the row of the last press on these lanes."""
 	rows = np.where(hit[:, own].any(axis=1), np.arange(hit.shape[0]), -1)
 	return np.maximum.accumulate(np.maximum(rows, 0))
-
-
-def _log(values: np.ndarray) -> np.ndarray:
-	return np.log(np.clip(values, LOG_FLOOR, LOG_CEIL))

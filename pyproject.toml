@@ -8,7 +8,7 @@ requires-python = ">=3.14"
 dependencies = ["urc-converter>=0.4.0"]
 
 [dependency-groups]
-dev = ["pytest>=9.2.0", "ruff>=0.17.3", "ty>=0.0.96", "scipy-stubs>=1.18.1.1"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.6", "ty>=0.0.110", "scipy-stubs>=1.18.1.1"]
 research = [
 	"arviz-stats>=1.3.3",
 	"hydra-core>=1.3.8",
@@ -64,3 +64,9 @@ select = [
 	"SIM",
 	"UP",
 ]
+
+[[tool.ty.overrides]]
+include = ["src/vsrgrating/encoder/**"]
+
+[tool.ty.overrides.rules]
+incompatible-mutable-override = "ignore"
