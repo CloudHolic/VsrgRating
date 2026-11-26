@@ -94,9 +94,17 @@ def posterior_cells(
 		frame=frame,
 		t=_t_split(frame, n_items, manifest["hash"]),
 		n_persons=persons.height,
-		split_hash=_split_hash(split),
+		split_hash=split_hash(split),
 		split_chart_index=split_manifest["chart_index"],
 	)
+
+
+def split_hash(split: pl.DataFrame) -> str:
+	"""The content hash of a mapset split table."""
+	# The split manifest carries no hash of its own; hashing the content, not the file bytes,
+	# keeps a rewritten copy of the same split equal.
+	content = split.sort("item_idx").select("item_idx", "beatmapset_id", "keys", "part")
+	return hashlib.blake2b(content.write_csv().encode(), digest_size=6).hexdigest()
 
 
 def _t_split(frame: pl.DataFrame, n_items: int, dataset_hash: str) -> Split:
@@ -112,13 +120,6 @@ def _t_split(frame: pl.DataFrame, n_items: int, dataset_hash: str) -> Split:
 		person_idx=person_idx,
 		dataset_hash=dataset_hash,
 	)
-
-
-def _split_hash(split: pl.DataFrame) -> str:
-	# The split manifest carries no hash of its own; hashing the content, not the file bytes,
-	# keeps a rewritten copy of the same split equal.
-	content = split.sort("item_idx").select("item_idx", "beatmapset_id", "keys", "part")
-	return hashlib.blake2b(content.write_csv().encode(), digest_size=6).hexdigest()
 
 
 def _read_json(path: Path) -> dict:
