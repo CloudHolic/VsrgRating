@@ -49,6 +49,7 @@ from vsrgrating.encoder.network import (
 	load_items,
 	load_posterior,
 	predict,
+	write_item_params,
 )
 from vsrgrating.tracking import run_output, write_metrics
 
@@ -67,6 +68,11 @@ class Part:
 	rows: np.ndarray
 	table: pl.DataFrame
 	cells: CellTensors
+
+	@property
+	def keys(self) -> pl.DataFrame:
+		"""The column naming its items in the tables written for it."""
+		return self.table.select("item_idx")
 
 
 def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> None:
@@ -187,17 +193,17 @@ def train_encoder(
 
 		if cfg.fit.keep_epochs:
 			(out / "epochs").mkdir(exist_ok=True)
-			write_items(out / "epochs" / f"items_dev_{epoch}.parquet", dev.table, dev_out)
+			write_item_params(out / "epochs" / f"items_dev_{epoch}.parquet", dev.keys, dev_out)
 
 	result = fit(model, train_data, dev_data, scaler, fit_config, on_epoch)
 
 	budget = fit_config.token_budget
 	predicted = predict(model, dev_data.inputs, scaler, budget)
 
-	write_items(
-		out / "items_train.parquet", train.table, predict(model, train_data.inputs, scaler, budget)
+	write_item_params(
+		out / "items_train.parquet", train.keys, predict(model, train_data.inputs, scaler, budget)
 	)
-	write_items(out / "items_dev.parquet", dev.table, predicted)
+	write_item_params(out / "items_dev.parquet", dev.keys, predicted)
 
 	variants = {
 		"unknown_judgment": predict(model, dev_data.inputs, scaler, budget, judgment_unknown=True),
@@ -208,7 +214,7 @@ def train_encoder(
 	checks: dict[str, float] = {}
 
 	for name, variant in variants.items():
-		write_items(out / f"items_dev_{name}.parquet", dev.table, variant)
+		write_item_params(out / f"items_dev_{name}.parquet", dev.keys, variant)
 		checks |= differences(name, variant, predicted)
 
 	checks |= dev_rates(out, model, scaler, budget, dev, charts)
@@ -263,8 +269,8 @@ def train_stats(
 		rtol=cfg.stats.rtol,
 	)
 
-	write_items(out / "items_train.parquet", train.table, result.train)
-	write_items(out / "items_dev.parquet", dev.table, result.dev)
+	write_item_params(out / "items_train.parquet", train.keys, result.train)
+	write_item_params(out / "items_dev.parquet", dev.keys, result.dev)
 	torch.save(
 		{"model": model.state_dict(), "init": asdict(init), "scaler": asdict(scaler)},
 		out / "model.pt",
@@ -330,7 +336,7 @@ def dev_rates(
 
 	predicted = predict(model, inputs, scaler, budget)
 	table = pl.DataFrame(keys, schema=["beatmap_id", "rate_group"], orient="row")
-	write_items(out / "dev_rates.parquet", table, predicted, keys=table.columns)
+	write_item_params(out / "dev_rates.parquet", table, predicted)
 
 	return {"dev_rates_finite": float(_finite(predicted))}
 
@@ -349,18 +355,6 @@ def differences(name: str, variant: ItemOutput, base: ItemOutput) -> dict[str, f
 		record[f"{name}_{part}_mean_gap"] = float(gap.abs().mean())
 
 	return record
-
-
-def write_items(
-	path: Path, table: pl.DataFrame, out: ItemOutput, keys: list[str] | None = None
-) -> None:
-	"""The `keys` columns of `table` (item_idx by default) with alpha_1..D, beta and sigma."""
-	alpha = out.alpha.detach().double().cpu().numpy()
-	table.select(keys or ["item_idx"]).with_columns(
-		*(pl.Series(f"alpha_{k + 1}", alpha[:, k]) for k in range(alpha.shape[1])),
-		pl.Series("beta", out.beta.detach().double().cpu().numpy()),
-		pl.Series("sigma", out.sigma.detach().double().cpu().numpy()),
-	).write_parquet(path)
 
 
 def _finite(out: ItemOutput) -> bool:

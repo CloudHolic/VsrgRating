@@ -3,15 +3,17 @@ log p(Y_T, Y_V) - log p(Y_T), and its mapset-block jackknife."""
 
 import hashlib
 from collections import Counter
+from pathlib import Path
 
 import jax.numpy as jnp
 import numpy as np
+import polars as pl
 from jax import Array
 
 from ..data import Split
 from ..irt.cnrm import model as cnrm
-from ..irt.map import person_summary
-from .fitted import Fitted
+from ..irt.map import Model, person_summary
+from .fitted import Fitted, read_transform
 
 BLOCK_SALT = "vsrgrating-jackknife-2026-11-25"
 
@@ -27,6 +29,57 @@ def predictive_gain(fitted: Fitted, base: Split, valid: Split, n_nodes: int) -> 
 		gain[persons] = _gain_of(fitted, base, valid, persons, n_nodes)
 
 	return gain
+
+
+def posterior_splits(
+	cells: pl.DataFrame, items: np.ndarray, n_persons: int, dataset_hash: str
+) -> tuple[Split, Split]:
+	"""T (the `in_t` cells of a fixed posterior run's cells.parquet) and V (every cell of `items`),
+	both over all `n_persons` dataset persons."""
+	held = cells.filter(pl.col("item_idx").is_in(pl.Series(items).implode()))
+	if held["in_t"].any():
+		raise ValueError("some evaluated items have cells in T")
+	n_items = int(cells["item_idx"].to_numpy().max()) + 1
+
+	def split(frame: pl.DataFrame) -> Split:
+		return Split(
+			person=frame["person_idx"].to_numpy(),
+			item=frame["item_idx"].to_numpy(),
+			x=frame["x"].to_numpy(),
+			n_persons=n_persons,
+			n_items=n_items,
+			person_idx=np.arange(n_persons),
+			dataset_hash=dataset_hash,
+		)
+
+	return split(cells.filter(pl.col("in_t"))), split(held)
+
+
+def posterior_fitted(run: Path, psi_v: pl.DataFrame, n_items: int) -> Fitted:
+	"""The fixed posterior run's G and psi_T, with `psi_v` (item_idx, alpha_1..D, beta, sigma) at
+	the evaluated items."""
+	psi_t = pl.read_parquet(run / "items.parquet")
+	if not set(psi_t["item_idx"]).isdisjoint(psi_v["item_idx"]):
+		raise ValueError("the evaluated items overlap T")
+
+	names = [c for c in psi_t.columns if c.startswith("alpha_")]
+	table = pl.concat([psi.select("item_idx", *names, "beta", "sigma") for psi in (psi_t, psi_v)])
+	idx = table["item_idx"].to_numpy()
+	alpha = np.zeros((n_items, len(names)))
+	beta, sigma = np.zeros(n_items), np.ones(n_items)
+	alpha[idx], beta[idx], sigma[idx] = (
+		table.select(names).to_numpy(),
+		table["beta"].to_numpy(),
+		table["sigma"].to_numpy(),
+	)
+	spec, raw = read_transform(run)
+	item = cnrm.ItemParams(
+		jnp.asarray(alpha[:, 0] if len(names) == 1 else alpha),
+		jnp.asarray(beta),
+		jnp.asarray(sigma),
+	)
+
+	return Fitted(run.name, Model("cnrm", spec, len(names)), item, raw, "map")
 
 
 def mapset_blocks(beatmapset_id: np.ndarray, keys: np.ndarray, n_blocks: int) -> np.ndarray:

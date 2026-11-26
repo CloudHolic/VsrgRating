@@ -1,5 +1,5 @@
-"""What training reads: the fixed person posterior, the items of chosen parts with their charts,
-and each chart as it was played."""
+"""What training reads and writes: the fixed person posterior, the items of chosen parts with their
+charts, each chart as it was played, and tables of predicted item parameters."""
 
 import json
 from collections.abc import Mapping, Sequence
@@ -13,6 +13,7 @@ from urc_converter import Chart, parse, scale_rate
 
 from ...data import RATE_GROUP_RATES, split_hash
 from ..inputs import count_split_chords
+from .heads import ItemOutput
 
 # Parts whose items a posterior with `drop_keys` leaves out; valid keeps them for transfer.
 _DROPPABLE = ("train", "dev")
@@ -104,6 +105,17 @@ def load_chart(charts_root: Path, row: Mapping) -> tuple[Chart, int]:
 
 	scaled = scale_rate(chart, RATE_GROUP_RATES[row["rate_group"]]).chart
 	return scaled, count_split_chords(chart, scaled)
+
+
+def write_item_params(path: Path, keys: pl.DataFrame, out: ItemOutput) -> None:
+	"""The rows of `keys` (the columns naming each item) with alpha_1..D, beta and sigma in
+	float64."""
+	alpha = out.alpha.detach().double().cpu().numpy()
+	keys.with_columns(
+		*(pl.Series(f"alpha_{k + 1}", alpha[:, k]) for k in range(alpha.shape[1])),
+		pl.Series("beta", out.beta.detach().double().cpu().numpy()),
+		pl.Series("sigma", out.sigma.detach().double().cpu().numpy()),
+	).write_parquet(path)
 
 
 def _values(values: Sequence, dtype: type[pl.DataType] = pl.String) -> pl.Series:

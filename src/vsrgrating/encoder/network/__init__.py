@@ -2,7 +2,7 @@
 
 from .batching import LayoutBatch, collate, encoder_tokens, token_batches
 from .heads import ChartItemModel, ItemHead, ItemInit, ItemOutput, StatsModel
-from .items import ItemCharts, Posterior, load_chart, load_items, load_posterior
+from .items import ItemCharts, Posterior, load_chart, load_items, load_posterior, write_item_params
 from .model import ChartEncoder, EncodedLayout, EncoderConfig
 from .objective import BOUNDARY_NODES, expected_log_k, log_expected_k
 from .scaling import Scaler, VectorScaler
@@ -52,4 +52,5 @@ __all__ = [
 	"log_expected_k",
 	"predict",
 	"token_batches",
+	"write_item_params",
 ]

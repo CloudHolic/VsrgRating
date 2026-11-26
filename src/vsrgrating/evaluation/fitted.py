@@ -52,10 +52,7 @@ def load_run(name: str, path: Path, chains: tuple[int, ...] | None = None) -> Fi
 			spec = TransformSpec("linear")
 			return Fitted(name, Model("cnrm", spec), item, spec.init(), kind)
 
-		record = json.loads((path / "transform.json").read_text(encoding="utf-8"))
-		spec = TransformSpec(record["kind"], tuple(record["knots"]), record["penalty"])
-		raw = jnp.asarray(record["raw"]).reshape(spec.init().shape)
-
+		spec, raw = read_transform(path)
 		return Fitted(name, Model("cnrm", spec, dims), item, raw, kind)
 
 	if kind == "map":
@@ -72,6 +69,13 @@ def load_run(name: str, path: Path, chains: tuple[int, ...] | None = None) -> Fi
 	item = zoi_beta.ItemParams(*(jnp.asarray(wide[c].to_numpy()) for c in zoi_beta.COORDS))
 
 	return Fitted(name, Model("zoi_beta"), item, None, kind)
+
+
+def read_transform(path: Path) -> tuple[TransformSpec, Array]:
+	"""G of the cnrm MAP run in `path`: its spec and raw parameters from transform.json."""
+	record = json.loads((path / "transform.json").read_text(encoding="utf-8"))
+	spec = TransformSpec(record["kind"], tuple(record["knots"]), record["penalty"])
+	return spec, jnp.asarray(record["raw"]).reshape(spec.init().shape)
 
 
 def run_hash(path: Path) -> str:
