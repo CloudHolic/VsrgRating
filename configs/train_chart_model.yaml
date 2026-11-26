@@ -1,0 +1,38 @@
+defaults:
+  - tracking: local
+  - _self_
+
+name: ???
+posterior_run: runs/keys4to8_posterior_d3/acc
+split_root: data/splits
+charts_root: data/charts
+runs_root: runs
+model:
+  kind: ???
+  encoder:
+    d_lane: 128
+    lane_layers: 2
+    lane_heads: 4
+    d_model: 256
+    layers: 6
+    heads: 8
+    ffn: 1024
+    dropout: 0.1
+    segment: 4096
+    queries: 4
+fit:
+  lr: ???
+  seed: 20261125
+  weight_decay: 0.01
+  warmup: 0.05
+  final_lr_fraction: 0.05
+  clip: 1.0
+  max_epochs: 60
+  patience: 10
+  token_budget: 32768
+  judgment_drop: 0.3
+  mirror: 0.5
+  keep_epochs: false
+stats:
+  max_iter: 2000
+  rtol: 1.0e-9

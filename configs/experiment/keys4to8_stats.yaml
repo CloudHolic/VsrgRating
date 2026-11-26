@@ -1,0 +1,4 @@
+# @package _global_
+name: keys4to8_stats
+model:
+  kind: stats

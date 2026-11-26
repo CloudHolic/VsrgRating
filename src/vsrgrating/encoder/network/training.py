@@ -1,4 +1,4 @@
-"""Fine-tuning under the fixed person posterior."""
+"""Training a chart model under the fixed person posterior."""
 
 import copy
 import math
@@ -44,7 +44,7 @@ class CellTensors:
 
 @dataclass(frozen=True)
 class FitConfig:
-	"""Optimizer, schedule, stopping and augmentation of one fine-tuning run."""
+	"""Optimizer, schedule, stopping and augmentation of one training run."""
 
 	lr: float
 	seed: int
@@ -259,6 +259,7 @@ def fit(
 			break
 
 	model.load_state_dict(best[2])
+
 	return FitResult(best[1], history)
 
 

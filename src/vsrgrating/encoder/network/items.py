@@ -1,4 +1,4 @@
-"""What fine-tuning reads: the fixed person posterior, the items of chosen parts with their charts,
+"""What training reads: the fixed person posterior, the items of chosen parts with their charts,
 and each chart as it was played."""
 
 import json

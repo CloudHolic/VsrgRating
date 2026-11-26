@@ -1,0 +1,6 @@
+# @package _global_
+name: keys4to8_scratch
+model:
+  kind: encoder
+fit:
+  keep_epochs: true
