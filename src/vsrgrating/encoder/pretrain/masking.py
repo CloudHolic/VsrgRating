@@ -4,9 +4,7 @@ from dataclasses import replace
 
 import numpy as np
 
-from .layouts import Finger, Hand
-from .schema import Flag, Known, LayoutInput
-from .tokens import ChartTokens, LaneState
+from ..inputs import ChartTokens, Finger, Flag, Hand, Known, LaneState, LayoutInput
 
 MLM_RATE = 0.3
 MLM_SPAN = (4, 16)

@@ -25,18 +25,15 @@ from urc_converter import Chart, UrcError, parse, scale_rate
 from vsrgrating.config import compose_config
 from vsrgrating.data import is_test_mapset
 from vsrgrating.encoder.inputs import (
-	ChartLoad,
 	ChartTokens,
 	LaneState,
 	LayoutInput,
-	LayoutLoad,
-	chart_load,
 	layout_input,
-	layout_load,
 	layouts,
 	tokenize,
 )
-from vsrgrating.encoder.network import LoadScaler, Scaler
+from vsrgrating.encoder.network import Scaler
+from vsrgrating.encoder.pretrain import ChartLoad, LayoutLoad, LoadScaler, chart_load, layout_load
 
 # Every rate pretraining may draw (0.75 to 1.50 by 0.01) must convert, or the chart is left out.
 RATES = tuple(round(0.75 + 0.01 * i, 2) for i in range(76))

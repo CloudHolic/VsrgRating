@@ -7,15 +7,8 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional
 
-from ..inputs import (
-	FINGER_STREAMS,
-	JUDGMENT_STREAMS,
-	LOAD_TAUS,
-	PAIR_STREAMS,
-	VISUAL_STREAMS,
-	Finger,
-	Hand,
-)
+from ..inputs import Finger, Hand
+from .load import FINGER_STREAMS, JUDGMENT_STREAMS, LOAD_TAUS, PAIR_STREAMS, VISUAL_STREAMS
 
 MLM_STATES = 6
 _FAMILIES = ("finger", "pair", "judgment", "visual")

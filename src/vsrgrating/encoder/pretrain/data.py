@@ -11,25 +11,20 @@ import torch
 from torch import Tensor
 from urc_converter import parse, scale_rate
 
-from ..inputs import (
-	LayoutInput,
-	chart_load,
-	layout_input,
-	layout_load,
-	layouts,
+from ..inputs import LayoutInput, layout_input, layouts, mirror, tokenize
+from ..network import LayoutBatch, Scaler, collate, token_batches
+from .heads import MLM_STATES, LoadTargets
+from .load import chart_load, layout_load
+from .masking import (
 	mask_future_holds,
 	mask_mlm,
-	mirror,
 	mlm_labels,
 	mlm_spans,
 	prefix_ends,
 	prefix_weights,
 	pretraining_view,
-	tokenize,
 )
-from .batching import LayoutBatch, collate, token_batches
-from .pretrain_heads import MLM_STATES, LoadTargets
-from .scaling import LoadScaler, Scaler
+from .scaling import LoadScaler
 
 # The purposes a step's draws are seeded by.
 BATCHING, AUGMENTATION, MLM_MASK, PREFIX_END = 0, 1, 2, 3

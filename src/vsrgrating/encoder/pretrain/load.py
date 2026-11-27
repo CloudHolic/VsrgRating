@@ -5,8 +5,7 @@ from dataclasses import dataclass
 import numpy as np
 from urc_converter import Chart, NoteType
 
-from .layouts import Finger, Hand, LaneMap, pairs
-from .tokens import ChartTokens, LaneState
+from ..inputs import ChartTokens, Finger, Hand, LaneMap, LaneState, pairs
 
 LOAD_TAUS = (0.25, 1.0, 4.0, 16.0, 64.0)
 FINGER_STREAMS = ("press", "release", "hold")

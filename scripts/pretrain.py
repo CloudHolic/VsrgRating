@@ -21,16 +21,14 @@ import typer
 from omegaconf import DictConfig
 
 from vsrgrating.config import compose_config
-from vsrgrating.encoder.network import (
-	ChartEncoder,
-	EncoderConfig,
+from vsrgrating.encoder.network import ChartEncoder, EncoderConfig, Scaler
+from vsrgrating.encoder.pretrain import (
 	LoadHead,
 	MLMHead,
 	PretrainConfig,
 	PretrainCorpus,
 	PretrainModel,
 	PretrainResult,
-	Scaler,
 	calibrate,
 	load_corpus,
 	pretrain,

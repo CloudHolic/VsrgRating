@@ -1,4 +1,4 @@
-"""Pretraining."""
+"""The pretraining loop and the calibration of its task weights and clip."""
 
 import copy
 import time
@@ -9,12 +9,9 @@ from pathlib import Path
 import numpy as np
 import torch
 from torch import Tensor, nn
-from torch.nn import functional
 from torch.utils.data import DataLoader, Dataset
 
-from ..inputs import LOAD_TAUS, LaneState
-from .model import ChartEncoder
-from .pretrain_data import (
+from .data import (
 	Augment,
 	LoadBatch,
 	MLMBatch,
@@ -24,15 +21,8 @@ from .pretrain_data import (
 	prepare,
 	watch_samples,
 )
-from .pretrain_heads import (
-	LoadHead,
-	LoadOutput,
-	MLMHead,
-	load_pool_loss,
-	load_token_loss,
-	mlm_loss,
-)
-from .scaling import LOAD_FAMILIES
+from .model import PretrainModel
+from .watch import evaluate_watch
 
 # The watch charts' masks and prefixes come from this seed, whatever the run's.
 WATCH_SEED = 20261127
@@ -88,67 +78,6 @@ class PretrainResult:
 	history: list[dict[str, float | str]]
 	branches: dict[float, Path]
 	watch: dict[float, dict[str, float]]
-
-
-class PretrainModel(nn.Module):
-	"""The encoder with the masked-note and load heads."""
-
-	def __init__(self, encoder: ChartEncoder, mlm: MLMHead, load: LoadHead) -> None:
-		super().__init__()
-
-		self.encoder = encoder
-		self.mlm = mlm
-		self.load = load
-
-	def mlm_loss(self, batch: MLMBatch) -> Tensor:
-		"""The masked pass's loss."""
-		encoded = self.encoder.encode_layout(batch.batch)
-		logits = self.mlm(encoded.token_repr, encoded.lane_repr)
-		layouts = batch.batch
-
-		return mlm_loss(logits, batch.labels, layouts.chart_of_layout, layouts.n_charts)
-
-	def load_outputs(self, batch: LoadBatch) -> tuple[LoadOutput, LoadOutput]:
-		"""The load to come at every token and from the first segment's pooled prefix."""
-		encoded = self.encoder.encode_layout(batch.batch, batch.prefix_end)
-		fingers, index = batch.targets.fingers, batch.batch.pair_index
-		tokens = self.load(encoded.token_repr, fingers, index)
-		pooled = self.encoder.pool_prefix(encoded, batch.prefix_end[:, 0])
-
-		return tokens, self.load.pooled(pooled, fingers, index)
-
-	def load_losses(self, batch: LoadBatch, valid: Mapping[str, Tensor]) -> tuple[Tensor, Tensor]:
-		"""The prefix pass's token and pooled losses."""
-		tokens, pooled = self.load_outputs(batch)
-		layouts = batch.batch
-
-		token_loss = load_token_loss(
-			tokens,
-			batch.targets,
-			valid,
-			batch.weights,
-			batch.n_tokens,
-			layouts.chart_of_layout,
-			layouts.n_charts,
-		)
-
-		pool_loss = load_pool_loss(
-			pooled,
-			batch.targets,
-			batch.prefix_end[:, 0],
-			valid,
-			layouts.chart_of_layout,
-			layouts.n_charts,
-		)
-
-		return token_loss, pool_loss
-
-	def shared(self) -> list[nn.Parameter]:
-		"""The encoder parameters both passes train: all but the pooling."""
-		pooling = {id(p) for p in (self.encoder.queries, *self.encoder.pool_key.parameters())}
-		pooling |= {id(p) for p in self.encoder.pool_value.parameters()}
-
-		return [p for p in self.encoder.parameters() if id(p) not in pooling]
 
 
 def wsd_factor(step: int, warm_steps: int, decay_start: int | None, decay_steps: int) -> float:
@@ -353,111 +282,6 @@ def calibrate(
 		g_load_pool=float(g_pool),
 		seconds_per_step=float(np.mean(seconds)),
 	)
-
-
-def evaluate_watch(
-	model: PretrainModel,
-	samples: Sequence[tuple[MLMBatch, LoadBatch, dict]],
-	valid: Mapping[str, Tensor],
-) -> dict[str, float]:
-	"""Both losses on the watch charts and the diagnostics."""
-	device = next(model.parameters()).device
-	was_training = model.training
-	model.eval()
-	sums: dict[str, float] = {}
-
-	def add(name: str, value: float, count: float) -> None:
-		sums[f"{name}.sum"] = sums.get(f"{name}.sum", 0.0) + value
-		sums[f"{name}.n"] = sums.get(f"{name}.n", 0.0) + count
-
-	with torch.no_grad():
-		for mlm_batch, load_batch, extra in samples:
-			mlm_batch, load_batch = mlm_batch.to(device), load_batch.to(device)
-			add("loss.mlm", float(model.mlm_loss(mlm_batch)), 1)
-
-			token_loss, pool_loss = model.load_losses(load_batch, valid)
-			add("loss.load_token", float(token_loss), 1)
-			add("loss.load_pool", float(pool_loss), 1)
-
-			_mlm_diagnostics(model, mlm_batch, extra, add)
-			_load_diagnostics(model, load_batch, extra, valid, add)
-
-	model.train(was_training)
-
-	return {
-		name[:-4]: sums[name] / max(sums[name[:-4] + ".n"], 1.0)
-		for name in sums
-		if name.endswith(".sum")
-	}
-
-
-def _mlm_diagnostics(model: PretrainModel, batch: MLMBatch, extra: dict, add: Callable) -> None:
-	encoded = model.encoder.encode_layout(batch.batch)
-	logits = model.mlm(encoded.token_repr, encoded.lane_repr)
-
-	labels = batch.labels
-	cells = labels >= 0
-
-	ce = functional.cross_entropy(logits.permute(0, 3, 1, 2), labels.clamp_min(0), reduction="none")
-	hit = logits.argmax(dim=-1) == labels
-	frequencies = torch.as_tensor(extra["frequencies"], device=labels.device)
-
-	base_p = torch.gather(
-		frequencies[:, None].expand(-1, labels.shape[1], -1, -1), -1, labels.clamp_min(0)[..., None]
-	)[..., 0]
-	base_ce = -torch.log(base_p.clamp_min(1e-12))
-	base_hit = frequencies.argmax(dim=-1)[:, None].expand_as(labels) == labels
-
-	filled = cells & (labels != LaneState.EMPTY)
-
-	for i, lanes in enumerate(extra["lanes"].tolist()):
-		for key in (f"{lanes}K", "all"):
-			n, m = float(cells[i].sum()), float(filled[i].sum())
-
-			add(f"mlm.{key}.ce", float(ce[i][cells[i]].sum()), n)
-			add(f"mlm.{key}.accuracy", float(hit[i][cells[i]].sum()), n)
-			add(f"mlm.{key}.filled_accuracy", float(hit[i][filled[i]].sum()), m)
-			add(f"mlm.{key}.baseline_ce", float(base_ce[i][cells[i]].sum()), n)
-			add(f"mlm.{key}.baseline_accuracy", float(base_hit[i][cells[i]].sum()), n)
-
-
-def _load_diagnostics(
-	model: PretrainModel, batch: LoadBatch, extra: dict, valid: Mapping[str, Tensor], add: Callable
-) -> None:
-	tokens, _ = model.load_outputs(batch)
-	supervised = batch.weights > 0
-
-	for family in LOAD_FAMILIES:
-		target = getattr(batch.targets, family)
-		pred = getattr(tokens, family)
-		past = torch.zeros_like(target)
-
-		for i, layout in enumerate(extra["past"]):
-			values = torch.as_tensor(layout[family], device=target.device)
-			index = (i, slice(0, values.shape[0]), *(slice(0, n) for n in values.shape[1:-2]))
-			past[index] = values
-
-		mask = valid[family]
-
-		if family in ("finger", "pair"):
-			entity = getattr(batch.targets, f"{family}_mask")[:, None, :, None]
-			cells = supervised[:, :, None, None] & entity
-		else:
-			cells = supervised[:, :, None]
-
-		for t, tau in enumerate(LOAD_TAUS):
-			keep = cells & mask[:, t]
-			n = float(keep.sum())
-
-			for name, guess in (
-				("model", pred),
-				("persistence", past),
-				("constant", torch.zeros_like(target)),
-			):
-				loss = functional.huber_loss(
-					guess[..., t], target[..., t], reduction="none", delta=1.0
-				)
-				add(f"load.{family}.tau{tau:g}.{name}", float(loss[keep].sum()), n)
 
 
 def _run(
