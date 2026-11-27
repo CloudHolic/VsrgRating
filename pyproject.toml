@@ -8,23 +8,23 @@ requires-python = ">=3.14"
 dependencies = ["urc-converter>=0.4.0"]
 
 [dependency-groups]
-dev = ["pytest>=9.2.0", "ruff>=0.17.6", "ty>=0.0.110", "scipy-stubs>=1.18.1.1"]
+dev = ["pytest>=9.2.0", "ruff>=0.17.6", "ty>=0.0.112", "scipy-stubs>=1.18.1.1"]
 research = [
 	"arviz-stats>=1.3.3",
 	"hydra-core>=1.3.8",
 	"ipykernel>=7.4.0",
-	"jax[cuda13]>=0.12.0.1",
+	"jax[cuda13]>=0.12.1",
 	"matplotlib>=3.11.2",
 	"mlflow==3.17.2",
 	"nbconvert>=7.17.2",
-	"numpy>=2.5.4",
+	"numpy>=2.5.5",
 	"numpyro>=0.22.0",
-	"omegaconf>=2.3.1",
-	"polars>=2.1.0",
-	"psycopg[binary]>=3.3.7",
+	"omegaconf>=2.4.0",
+	"polars>=2.2.0",
+	"psycopg[binary]>=3.3.9",
 	"scipy>=1.18.1",
 	"torch>=2.15.0",
-	"typer>=0.27.3",
+	"typer>=0.29.3",
 ]
 
 [tool.uv]
