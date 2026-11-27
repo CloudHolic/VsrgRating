@@ -1,0 +1,37 @@
+defaults:
+  - tracking: local
+  - _self_
+
+name: ???
+corpus: ???
+charts_root: data/charts
+runs_root: runs
+mode: ???
+calibration: null
+resume: null
+model:
+  encoder:
+    d_lane: 128
+    lane_layers: 2
+    lane_heads: 4
+    d_model: 256
+    layers: 6
+    heads: 8
+    ffn: 1024
+    dropout: 0.1
+    segment: 4096
+    queries: 4
+losses:
+  mlm: true
+  load: true
+optim:
+  lr: 3.0e-4
+  warmup: 0.02
+  decay: 0.2
+  weight_decay: 0.01
+  token_budget: 32768
+updates: ???
+branches: [0.25, 0.5, 1.0]
+workers: 4
+watch_every: 0
+seed: 20261127

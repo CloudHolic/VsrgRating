@@ -1,0 +1,8 @@
+charts_root: data/charts
+chart_index: 2026-11-25
+split: data/splits/keys4to8/c9190f0c5887
+out_root: data/pretrain
+name: osu_ranked
+watch_fraction: 0.02
+salt: vsrgrating-pretrain-watch-2026-11-27
+workers: 8

@@ -7,8 +7,10 @@ posterior_run: runs/keys4to8_posterior_d3/acc
 split_root: data/splits
 charts_root: data/charts
 runs_root: runs
+scaler: null
 model:
   kind: ???
+  pretrained: null
   encoder:
     d_lane: 128
     lane_layers: 2

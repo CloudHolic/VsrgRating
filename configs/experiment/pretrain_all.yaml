@@ -1,0 +1,3 @@
+# @package _global_
+name: pretrain_all
+corpus: data/pretrain/osu_ranked/d09695a9f79f

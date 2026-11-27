@@ -1,6 +1,8 @@
 """Train a chart model on the train items under a fixed person posterior.
 
 uv run --env-file .env scripts/train_chart_model.py +experiment=keys4to8_scratch fit.lr=3e-4
+uv run --env-file .env scripts/train_chart_model.py +experiment=keys4to8_scratch fit.lr=1e-4 \
+	model.pretrained=runs/pretrain_all/all-L6-seed20261127/branch_1.pt
 uv run --env-file .env scripts/train_chart_model.py +experiment=keys4to8_stats
 """
 
@@ -58,7 +60,7 @@ PARTS = ("train", "dev")
 OD_STEP_MS = 3.0
 
 type Charts = list[list[LayoutInput]]
-type Record = tuple[dict[str, float], dict[str, list[float]]]
+type Record = tuple[dict[str, str], dict[str, float], dict[str, list[float]]]
 
 
 @dataclass(frozen=True)
@@ -103,23 +105,36 @@ def main(overrides: Annotated[list[str] | None, typer.Argument()] = None) -> Non
 		start = time.perf_counter()
 
 		if cfg.model.kind == "encoder":
-			metrics, series = train_encoder(cfg, out, posterior, train, dev, charts, tokens)
+			start_tags, metrics, series = train_encoder(
+				cfg, out, posterior, train, dev, charts, tokens
+			)
 		else:
-			metrics, series = train_stats(cfg, out, posterior, train, dev, tokens)
+			start_tags, metrics, series = train_stats(cfg, out, posterior, train, dev, tokens)
 
 		metrics |= {
 			"collisions": float(sum(t.collisions for t in tokens)),
 			"split_chords": float(split_chords),
 			"runtime_s": time.perf_counter() - start,
 		}
-		write_metrics(out, tags, metrics, series)
+		write_metrics(out, tags | start_tags, metrics, series)
 
 
 def run_label(cfg: DictConfig) -> str:
 	match cfg.model.kind:
 		case "encoder":
-			return f"lr{cfg.fit.lr:g}-seed{cfg.fit.seed}"
+			label = f"lr{cfg.fit.lr:g}-seed{cfg.fit.seed}"
+			if cfg.model.pretrained is None:
+				return label
+
+			checkpoint = Path(cfg.model.pretrained)
+			frac = checkpoint.stem.removeprefix("branch_")
+
+			return f"pre-{checkpoint.parent.name}-{frac}-{label}"
+
 		case "stats":
+			if cfg.model.pretrained is not None or cfg.scaler is not None:
+				raise ValueError("model.pretrained and scaler apply to the encoder only")
+
 			return "lbfgs"
 
 	raise ValueError(f"model.kind must be encoder or stats, got {cfg.model.kind!r}")
@@ -167,10 +182,11 @@ def train_encoder(
 
 	inputs = [inputs_of(t) for t in tokens]
 	mirrored = [inputs_of(tokenize(mirror(chart))) for chart in charts]
-	scaler = Scaler.fit([x for i in train.rows for x in inputs[i]])
+	scaler, config, weights = encoder_start(cfg, [x for i in train.rows for x in inputs[i]])
 
-	config = EncoderConfig(**cfg.model.encoder)
 	encoder = ChartEncoder(config)
+	if weights is not None:
+		encoder.load_state_dict(weights)
 
 	init = item_init(posterior)
 	model = ChartItemModel(encoder, ItemHead(encoder.width, init)).to(device)
@@ -238,8 +254,36 @@ def train_encoder(
 		**checks,
 	}
 	series = {name: [h[name] for h in result.history] for name in result.history[0]}
+	tags = {
+		"pretrained": str(cfg.model.pretrained),
+		"scaler": str(cfg.scaler),
+		"scaler_digest": scaler.digest(),
+	}
 
-	return metrics, series
+	return tags, metrics, series
+
+
+def encoder_start(
+	cfg: DictConfig, train_inputs: list[LayoutInput]
+) -> tuple[Scaler, EncoderConfig, dict[str, torch.Tensor] | None]:
+	"""The input scaler, the encoder's config and its pretrained weights, if any."""
+	given = None
+	if cfg.scaler is not None:
+		given = Scaler.from_dict(torch.load(cfg.scaler, weights_only=True))
+
+	if cfg.model.pretrained is None:
+		scaler = given if given is not None else Scaler.fit(train_inputs)
+		return scaler, EncoderConfig(**cfg.model.encoder), None
+
+	checkpoint = torch.load(cfg.model.pretrained, weights_only=True)
+	scaler = Scaler.from_dict(checkpoint["scaler"])
+
+	if given is not None and given.digest() != scaler.digest():
+		raise ValueError(
+			f"{cfg.scaler} is not the scaler {cfg.model.pretrained} was pretrained with"
+		)
+
+	return scaler, EncoderConfig(**checkpoint["config"]), checkpoint["encoder"]
 
 
 def train_stats(
@@ -282,7 +326,7 @@ def train_stats(
 		"train_nll": result.losses[-1],
 	}
 
-	return metrics, {"loss": result.losses}
+	return {}, metrics, {"loss": result.losses}
 
 
 def item_init(posterior: Posterior) -> ItemInit:
