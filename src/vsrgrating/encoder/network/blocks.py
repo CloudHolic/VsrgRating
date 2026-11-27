@@ -36,7 +36,8 @@ class Block(nn.Module):
 		self.drop = nn.Dropout(dropout)
 
 	def forward(self, x: Tensor, keep: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-		"""`x` (N, T, d) attending where `keep` (N, 1, 1, T) is set."""
+		"""`x` (N, T, d) attending where `keep` is set: (N, 1, 1, T) for every query alike, or
+		(N, 1, T, T) per query."""
 		n, t, d = x.shape
 
 		q, k, v = self.qkv(self.norm1(x)).reshape(n, t, 3, self.heads, d // self.heads).unbind(2)

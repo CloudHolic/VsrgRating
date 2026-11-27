@@ -1,11 +1,14 @@
 """Standardization of the continuous model inputs over a training set."""
 
-from collections.abc import Sequence
+import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
 
 import numpy as np
+import torch
+from torch import Tensor
 
-from ..inputs import Known, LayoutInput, token_known
+from ..inputs import Known, LayoutInput
 
 
 @dataclass(frozen=True)
@@ -16,8 +19,8 @@ class Scaler:
 	std: dict[str, np.ndarray]
 
 	@classmethod
-	def fit(cls, inputs: Sequence[LayoutInput]) -> Scaler:
-		"""Statistics over `inputs`, every value counted once."""
+	def fit(cls, inputs: Iterable[LayoutInput]) -> Scaler:
+		"""Statistics over `inputs`, every known value counted once."""
 		# Judgment statistics exist even when no training chart has a judgment.
 		sums: dict[str, list[np.ndarray]] = {"judgment": [np.zeros(2) for _ in range(3)]}
 		for x in inputs:
@@ -44,6 +47,32 @@ class Scaler:
 		scaled = np.divide(values - self.mean[name], std, out=np.zeros(values.shape), where=std > 0)
 		return np.where(known == Known.KNOWN, scaled, 0.0).astype(np.float32)
 
+	def to_dict(self) -> dict[str, dict[str, Tensor]]:
+		"""The statistics as tensor, loadable with `torch.load(..., weights_only=True)`."""
+		return {
+			part: {name: torch.from_numpy(values) for name, values in stats.items()}
+			for part, stats in (("mean", self.mean), ("std", self.std))
+		}
+
+	@classmethod
+	def from_dict(cls, record: dict[str, dict[str, Tensor]]) -> Scaler:
+		"""The scaler `to_dict` wrote."""
+		mean, std = (
+			{name: value.numpy().astype(np.float64) for name, value in record[part].items()}
+			for part in ("mean", "std")
+		)
+		return cls(mean, std)
+
+	def digest(self) -> str:
+		"""A hash of the statistics, equal for equal scalers."""
+		h = hashlib.blake2b(digest_size=8)
+		for name in sorted(self.mean):
+			h.update(name.encode())
+			h.update(self.mean[name].astype(np.float64).tobytes())
+			h.update(self.std[name].astype(np.float64).tobytes())
+
+		return h.hexdigest()
+
 
 @dataclass(frozen=True)
 class VectorScaler:
@@ -65,11 +94,11 @@ class VectorScaler:
 def _columns(x: LayoutInput) -> dict[str, tuple[np.ndarray, np.ndarray]]:
 	"""Each continuous block of `x` with the Known array of its values."""
 	columns = {
-		"token": (x.token, token_known(x)),
+		"token": (x.token, x.token_known),
 		"lane": (x.lane, x.lane_known),
 		"finger": (x.finger, x.finger_known),
 		"pair": (x.pair, x.pair_known),
-		"meta": (x.meta[None], np.zeros((1, x.meta.size), np.int8)),
+		"meta": (x.meta[None], x.meta_known[None]),
 	}
 	if x.judgment is not None:
 		columns["judgment"] = (x.judgment, np.zeros(x.judgment.shape, np.int8))

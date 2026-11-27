@@ -16,7 +16,6 @@ from ..inputs import (
 	Finger,
 	Flag,
 	Hand,
-	Known,
 	LaneState,
 )
 from .batching import LayoutBatch
@@ -45,6 +44,7 @@ class EncodedLayout:
 
 	token_repr: Tensor
 	meta_repr: Tensor
+	first_meta: Tensor
 	lane_repr: Tensor
 	mask: Tensor
 
@@ -80,7 +80,7 @@ class ChartEncoder(nn.Module):
 		self.mirror = nn.Embedding(len(Flag), d)
 		self.same_fingers = nn.Embedding(len(Flag), d)
 
-		self.meta = mlp(len(META_FEATURES), d)
+		self.meta = Valued(len(META_FEATURES), d)
 		self.judgment = mlp(2, d)
 		self.judgment_unknown = nn.Parameter(torch.randn(d) * 0.02)
 
@@ -98,7 +98,7 @@ class ChartEncoder(nn.Module):
 		"""Length of the chart vector."""
 		return self.config.queries * self.config.d_model
 
-	def encode_layout(self, batch: LayoutBatch) -> EncodedLayout:
+	def encode_layout(self, batch: LayoutBatch, prefix_end: Tensor | None = None) -> EncodedLayout:
 		"""Every layout pass of the batch, before pooling."""
 		b, t, lanes = batch.state.shape
 		dl = self.config.d_lane
@@ -121,9 +121,6 @@ class ChartEncoder(nn.Module):
 		lane_repr = lane_repr.reshape(b, t, lanes, dl)
 		lane_mean = masked_mean(lane_repr, batch.lane_mask[:, None, :, None], dim=2)
 
-		token_known = torch.full_like(batch.token, Known.KNOWN, dtype=torch.long)
-		token_known[..., 0] = batch.token_dt_known
-
 		pair = (
 			self.pair_values(batch.pair, batch.pair_known)
 			+ (
@@ -133,7 +130,7 @@ class ChartEncoder(nn.Module):
 		)
 		tokens = (
 			self.lane_out(lane_mean)
-			+ self.token_values(batch.token, token_known)
+			+ self.token_values(batch.token, batch.token_known)
 			+ masked_mean(pair, batch.pair_mask[:, None, :, None], dim=2)
 			+ self.mirror(batch.hands[..., 0])
 			+ self.same_fingers(batch.hands[..., 1])
@@ -141,20 +138,28 @@ class ChartEncoder(nn.Module):
 
 		judgment = masked_mean(self.judgment(batch.judgment), batch.judgment_mask[..., None], dim=1)
 		unknown = batch.judgment_unknown[:, None]
-		meta = self.meta(batch.meta) + torch.where(unknown, self.judgment_unknown, judgment)
+		meta = self.meta(batch.meta, batch.meta_known) + torch.where(
+			unknown, self.judgment_unknown, judgment
+		)
 
-		token_repr, meta_repr = self._sequence(tokens, meta, batch.token_mask)
+		token_repr, meta_repr, first_meta = self._sequence(
+			tokens, meta, batch.token_mask, prefix_end
+		)
 
-		return EncodedLayout(token_repr, meta_repr, lane_repr, batch.token_mask)
+		return EncodedLayout(token_repr, meta_repr, first_meta, lane_repr, batch.token_mask)
 
 	def pool(self, encoded: EncodedLayout) -> Tensor:
 		"""(B, queries * d_model): attention pooling over the note tokens and the meta vector."""
-		keys = torch.cat([encoded.token_repr, encoded.meta_repr[:, None]], dim=1)
-		mask = torch.cat([encoded.mask, encoded.mask.new_ones(encoded.mask.shape[0], 1)], dim=1)
-		scores = self.queries @ self.pool_key(keys).transpose(1, 2) / math.sqrt(keys.shape[-1])
-		weights = scores.masked_fill(~mask[:, None], float("-inf")).softmax(dim=-1)
+		return self._pool(encoded.token_repr, encoded.meta_repr, encoded.mask)
 
-		return (weights @ self.pool_value(keys)).flatten(1)
+	def pool_prefix(self, encoded: EncodedLayout, prefix_end0: Tensor) -> Tensor:
+		"""(B, queries * d_model): the pooling of the first segment's meta token and notes
+		0..prefix_end0 only, which see nothing later under a prefix mask."""
+		t = encoded.token_repr.shape[1]
+		index = torch.arange(t, device=prefix_end0.device)
+		mask = encoded.mask & (index[None] <= prefix_end0[:, None])
+
+		return self._pool(encoded.token_repr, encoded.first_meta, mask)
 
 	def forward(self, batch: LayoutBatch) -> Tensor:
 		"""(C, width): each chart's vector, the mean over its layout passes."""
@@ -165,7 +170,17 @@ class ChartEncoder(nn.Module):
 
 		return sums / counts[:, None]
 
-	def _sequence(self, tokens: Tensor, meta: Tensor, mask: Tensor) -> tuple[Tensor, Tensor]:
+	def _pool(self, tokens: Tensor, meta: Tensor, mask: Tensor) -> Tensor:
+		keys = torch.cat([tokens, meta[:, None]], dim=1)
+		mask = torch.cat([mask, mask.new_ones(mask.shape[0], 1)], dim=1)
+		scores = self.queries @ self.pool_key(keys).transpose(1, 2) / math.sqrt(keys.shape[-1])
+		weights = scores.masked_fill(~mask[:, None], float("-inf")).softmax(dim=-1)
+
+		return (weights @ self.pool_value(keys)).flatten(1)
+
+	def _sequence(
+		self, tokens: Tensor, meta: Tensor, mask: Tensor, prefix_end: Tensor | None
+	) -> tuple[Tensor, Tensor, Tensor]:
 		"""The Transformer over segments of note tokens, each led by the meta token."""
 		b, t, d = tokens.shape
 		chunk = min(self.config.segment - 1, t)
@@ -181,6 +196,15 @@ class ChartEncoder(nn.Module):
 		keep = torch.cat([note_mask.new_ones(b, segments, 1), note_mask], dim=2)
 		keep = keep.reshape(b * segments, 1, 1, chunk + 1)
 
+		if prefix_end is not None:
+			# Index 0 is the meta token, so notes 0..c sit at 1..c + 1.
+			index = torch.arange(chunk + 1, device=tokens.device)
+			bound = (prefix_end.reshape(b * segments) + 1)[:, None, None, None]
+			causal = (index[None, None, None] <= index[None, None, :, None]) | (
+				index[None, None, None] <= bound
+			)
+			keep = keep & causal
+
 		cos, sin = rotary(chunk + 1, d // self.config.heads, x.device)
 
 		for block in self.blocks:
@@ -191,4 +215,4 @@ class ChartEncoder(nn.Module):
 		used = note_mask.any(dim=2)
 		meta_repr = masked_mean(x[:, :, 0], used[..., None], dim=1)
 
-		return token_repr, meta_repr
+		return token_repr, meta_repr, x[:, 0, 0]

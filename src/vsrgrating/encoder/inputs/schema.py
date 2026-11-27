@@ -54,7 +54,7 @@ class LayoutInput:
 
 	state: np.ndarray
 	token: np.ndarray
-	token_dt_known: np.ndarray
+	token_known: np.ndarray
 	lane: np.ndarray
 	lane_known: np.ndarray
 	finger: np.ndarray
@@ -67,12 +67,5 @@ class LayoutInput:
 	lane_finger: np.ndarray
 	lane_position: np.ndarray
 	meta: np.ndarray
+	meta_known: np.ndarray
 	judgment: np.ndarray | None
-
-
-def token_known(x: LayoutInput) -> np.ndarray:
-	"""The Known state of every token column: only the first (time since the previous token)
-	can be undefined."""
-	known = np.full(x.token.shape, Known.KNOWN, np.int8)
-	known[:, 0] = x.token_dt_known
-	return known

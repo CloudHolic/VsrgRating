@@ -21,13 +21,16 @@ def layout_input(tokens: ChartTokens, lane_map: LaneMap) -> LayoutInput:
 	times = tokens.times.astype(float)
 	parts = body(tokens, lane_map)
 
-	token_dt_known = np.full(times.size, Known.KNOWN, dtype=np.int8)
-	token_dt_known[0] = Known.NONE
+	token = _token_features(tokens, times)
+	# Only the first token's gap to the previous token is undefined.
+	token_known = np.full(token.shape, Known.KNOWN, dtype=np.int8)
+	token_known[0, 0] = Known.NONE
+	meta = _meta(tokens, times, lane_map)
 
 	return LayoutInput(
 		state=tokens.state,
-		token=_token_features(tokens, times),
-		token_dt_known=token_dt_known,
+		token=token,
+		token_known=token_known,
 		lane=parts.lane,
 		lane_known=parts.lane_known,
 		finger=parts.finger,
@@ -39,7 +42,8 @@ def layout_input(tokens: ChartTokens, lane_map: LaneMap) -> LayoutInput:
 		lane_hand=np.array(lane_map.hand, dtype=np.int8),
 		lane_finger=np.array(lane_map.finger, dtype=np.int8),
 		lane_position=_lane_position(lanes, tokens.special_lanes),
-		meta=_meta(tokens, times, lane_map),
+		meta=meta,
+		meta_known=np.full(meta.shape, Known.KNOWN, dtype=np.int8),
 		judgment=_judgment(tokens.judgment),
 	)
 

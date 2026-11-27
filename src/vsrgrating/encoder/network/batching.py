@@ -8,7 +8,7 @@ import numpy as np
 import torch
 from torch import Tensor
 
-from ..inputs import Known, LayoutInput, token_known
+from ..inputs import Known, LayoutInput
 from .scaling import Scaler
 
 
@@ -18,7 +18,7 @@ class LayoutBatch:
 
 	state: Tensor
 	token: Tensor
-	token_dt_known: Tensor
+	token_known: Tensor
 	lane: Tensor
 	lane_known: Tensor
 	finger: Tensor
@@ -31,6 +31,7 @@ class LayoutBatch:
 	lane_finger: Tensor
 	lane_position: Tensor
 	meta: Tensor
+	meta_known: Tensor
 	judgment: Tensor
 	judgment_mask: Tensor
 	judgment_unknown: Tensor
@@ -71,7 +72,7 @@ def collate(
 	out = {
 		"state": np.zeros((b, t, lanes), np.int64),
 		"token": np.zeros((b, t, inputs[0].token.shape[1]), np.float32),
-		"token_dt_known": np.full((b, t), Known.NONE, np.int64),
+		"token_known": np.full((b, t, inputs[0].token.shape[1]), Known.NONE, np.int64),
 		"lane": np.zeros((b, t, lanes, inputs[0].lane.shape[2]), np.float32),
 		"lane_known": np.full((b, t, lanes, inputs[0].lane.shape[2]), Known.NONE, np.int64),
 		"finger": np.zeros((b, t, lanes, inputs[0].finger.shape[2]), np.float32),
@@ -84,6 +85,7 @@ def collate(
 		"lane_finger": np.zeros((b, lanes), np.int64),
 		"lane_position": np.zeros((b, lanes, 3), np.float32),
 		"meta": np.zeros((b, inputs[0].meta.shape[0]), np.float32),
+		"meta_known": np.zeros((b, inputs[0].meta.shape[0]), np.int64),
 		"judgment": np.zeros((b, j, 2), np.float32),
 		"judgment_mask": np.zeros((b, j), bool),
 		"token_mask": np.zeros((b, t), bool),
@@ -96,8 +98,8 @@ def collate(
 		q = x.pair_index.shape[0]
 
 		out["state"][i, :n, :k] = x.state
-		out["token"][i, :n] = scaler.apply("token", x.token, token_known(x))
-		out["token_dt_known"][i, :n] = x.token_dt_known
+		out["token"][i, :n] = scaler.apply("token", x.token, x.token_known)
+		out["token_known"][i, :n] = x.token_known
 
 		for name in ("lane", "finger", "pair"):
 			known = getattr(x, f"{name}_known")
@@ -111,7 +113,8 @@ def collate(
 		out["lane_hand"][i, :k] = x.lane_hand
 		out["lane_finger"][i, :k] = x.lane_finger
 		out["lane_position"][i, :k] = x.lane_position
-		out["meta"][i] = scaler.apply("meta", x.meta, np.zeros(x.meta.shape, np.int8))
+		out["meta"][i] = scaler.apply("meta", x.meta, x.meta_known)
+		out["meta_known"][i] = x.meta_known
 
 		if x.judgment is not None and not unknown[i]:
 			out["judgment"][i, : len(x.judgment)] = scaler.apply(

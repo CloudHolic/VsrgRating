@@ -11,7 +11,6 @@ from .schema import (
 	Flag,
 	Known,
 	LayoutInput,
-	token_known,
 )
 from .stats import STATS_FEATURES, chart_stats
 from .tokens import ChartTokens, LaneState, count_split_chords, mirror, tokenize
@@ -37,6 +36,5 @@ __all__ = [
 	"layouts",
 	"mirror",
 	"pairs",
-	"token_known",
 	"tokenize",
 ]
